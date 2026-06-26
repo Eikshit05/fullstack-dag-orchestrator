@@ -1,10 +1,7 @@
 // submit.js
 
-export const SubmitButton = () => {
-
-    return (
-        <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-            <button type="submit">Submit</button>
-        </div>
-    );
-}
+export const SubmitButton = () => (
+  <div className="vs-submit-bar">
+    <button type="submit" className="vs-submit-btn">Submit</button>
+  </div>
+);

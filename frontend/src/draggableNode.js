@@ -1,33 +1,27 @@
 // draggableNode.js
 
-export const DraggableNode = ({ type, label }) => {
-    const onDragStart = (event, nodeType) => {
-      const appData = { nodeType }
-      event.target.style.cursor = 'grabbing';
-      event.dataTransfer.setData('application/reactflow', JSON.stringify(appData));
-      event.dataTransfer.effectAllowed = 'move';
-    };
-  
-    return (
-      <div
-        className={type}
-        onDragStart={(event) => onDragStart(event, type)}
-        onDragEnd={(event) => (event.target.style.cursor = 'grab')}
-        style={{ 
-          cursor: 'grab', 
-          minWidth: '80px', 
-          height: '60px',
-          display: 'flex', 
-          alignItems: 'center', 
-          borderRadius: '8px',
-          backgroundColor: '#1C2536',
-          justifyContent: 'center', 
-          flexDirection: 'column'
-        }} 
-        draggable
-      >
-          <span style={{ color: '#fff' }}>{label}</span>
-      </div>
-    );
+// Static map so Tailwind's content scanner sees the literal class names.
+const CHIP_BG = {
+  io: 'bg-accent-io',
+  ai: 'bg-accent-ai',
+  logic: 'bg-accent-logic',
+  text: 'bg-accent-text',
+  neutral: 'bg-accent-neutral',
+};
+
+export const DraggableNode = ({ type, label, category }) => {
+  const onDragStart = (event, nodeType) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ nodeType }));
+    event.dataTransfer.effectAllowed = 'move';
   };
-  
+
+  return (
+    <div
+      className={`vs-chip ${CHIP_BG[category] || CHIP_BG.neutral}`}
+      onDragStart={(event) => onDragStart(event, type)}
+      draggable
+    >
+      {label}
+    </div>
+  );
+};
