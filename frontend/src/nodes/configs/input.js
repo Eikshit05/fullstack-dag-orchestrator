@@ -3,7 +3,7 @@ export const inputConfig = {
   title: 'Input',
   category: 'io',
   fields: [
-    { name: 'inputName', label: 'Name', kind: 'text', default: '' },
+    { name: 'inputName', label: 'Name', kind: 'text', default: (id) => id.replace('customInput-', 'input_') },
     { name: 'inputType', label: 'Type', kind: 'select', options: ['Text', 'File'], default: 'Text' },
   ],
   handles: [{ id: 'value', type: 'source', position: 'right' }],

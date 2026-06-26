@@ -53,11 +53,13 @@ export function BaseNode({ id, data, config }) {
           : fields.map((f) => {
               const Field = FIELD_COMPONENTS[f.kind];
               if (!Field) return null;
+              // `default` may be a function of the node id (e.g. derive "input_1").
+              const fallback = typeof f.default === 'function' ? f.default(id) : f.default;
               return (
                 <Field
                   key={f.name}
                   field={f}
-                  value={data[f.name] ?? f.default ?? ''}
+                  value={data[f.name] ?? fallback ?? ''}
                   onChange={(v) => updateNodeField(id, f.name, v)}
                 />
               );

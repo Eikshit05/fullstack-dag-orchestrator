@@ -3,7 +3,7 @@ export const outputConfig = {
   title: 'Output',
   category: 'io',
   fields: [
-    { name: 'outputName', label: 'Name', kind: 'text', default: '' },
+    { name: 'outputName', label: 'Name', kind: 'text', default: (id) => id.replace('customOutput-', 'output_') },
     { name: 'outputType', label: 'Type', kind: 'select', options: ['Text', 'Image'], default: 'Text' },
   ],
   handles: [{ id: 'value', type: 'target', position: 'left' }],
