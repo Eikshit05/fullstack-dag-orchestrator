@@ -42,12 +42,32 @@ export const useStore = create((set, get) => ({
     },
     updateNodeField: (nodeId, fieldName, fieldValue) => {
       set({
-        nodes: get().nodes.map((node) => {
-          if (node.id === nodeId) {
-            node.data = { ...node.data, [fieldName]: fieldValue };
+        nodes: get().nodes.map((node) =>
+          node.id === nodeId
+            ? { ...node, data: { ...node.data, [fieldName]: fieldValue } }
+            : node
+        ),
+      });
+    },
+    removeNode: (nodeId) => {
+      set({
+        nodes: get().nodes.filter((n) => n.id !== nodeId),
+        edges: get().edges.filter(
+          (e) => e.source !== nodeId && e.target !== nodeId
+        ),
+      });
+    },
+    syncNodeHandles: (nodeId, validHandleIds) => {
+      const valid = new Set(validHandleIds);
+      set({
+        edges: get().edges.filter((e) => {
+          if (e.source === nodeId && e.sourceHandle && !valid.has(e.sourceHandle)) {
+            return false;
           }
-  
-          return node;
+          if (e.target === nodeId && e.targetHandle && !valid.has(e.targetHandle)) {
+            return false;
+          }
+          return true;
         }),
       });
     },
