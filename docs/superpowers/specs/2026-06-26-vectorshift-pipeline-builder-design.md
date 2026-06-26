@@ -55,6 +55,7 @@ vectorshift-assessment/                # root monorepo (new git repo)
 │   ├── craco.config.js               # enables Tailwind/PostCSS on CRA
 │   ├── tailwind.config.js            # design tokens (colors, radii, shadows, spacing)
 │   ├── postcss.config.js
+│   ├── .env.example                  # REACT_APP_API_URL seam (§7.3)
 │   └── src/
 │       ├── components/               # shared, non-node UI
 │       │   ├── ResultCard.jsx        # styled submit-result card
@@ -176,11 +177,20 @@ registry line + one `DraggableNode` in the toolbar.
 
 ## 6. Part 3 — Text Node Logic
 
-### 6.1 Auto-resize
+### 6.1 Auto-resize (hidden-mirror pattern)
 
-A `<textarea>` (replacing the single-line `<input>`) grows with content: height
-tracks `scrollHeight`; width tracks the longest line. Both are **clamped** to
-min/max bounds so the canvas layout stays stable.
+A `<textarea>` replaces the single-line `<input>`. Rather than measuring text width
+in JS (unreliable across font metrics, kerning, and web-font load timing — and prone
+to layout thrash during ReactFlow pan/zoom), we use a **hidden mirror**: a visually
+hidden `<div>` with `white-space: pre-wrap` and identical typography/padding mirrors
+the textarea's content. A `ResizeObserver` on the mirror feeds **stable** width/height
+back into node state, letting the browser's layout engine do the geometry. Both
+dimensions are **clamped** to min/max bounds so the canvas stays stable. Size changes
+trigger the §9.1 re-measure so edges track the resized node.
+
+**Throttling:** `ResizeObserver` can fire many times per second during typing/paste.
+The callback coalesces updates with `requestAnimationFrame` (one state commit per frame)
+so rapid input can't stutter the canvas, and the rAF handle is cancelled on unmount.
 
 ### 6.2 Variable handles
 
@@ -188,12 +198,18 @@ min/max bounds so the canvas layout stays stable.
 
 - Regex: `/\{\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}\}/g`
 - **Dedupe** repeated names (`{{x}} {{x}}` → one handle).
-- Keep only **valid JS identifiers**; ignore reserved words and malformed tokens.
-- Returns a stable, ordered, unique list.
+- Keep only **valid JS identifiers**. Match captures are intersected against an
+  explicit **`RESERVED` `Set`** of JS keywords (`function`, `return`, `class`, `const`,
+  `if`, `for`, `new`, `this`, …); reserved words and malformed tokens are silently
+  discarded so they never produce a handle that could collide downstream.
+- Returns a **stable, ordered, unique** list — and is **memoized** on `text` so the
+  §9.1 re-measure effect compares a stable reference, not a fresh array each render.
 
 These feed the Text config's `handles: (data) => [...]` → left-side **target** handles
 appear/disappear live as the user types. The Text node writes `text` to the store so
-handle recomputation is driven by state.
+handle recomputation is driven by state. Recomputation is **debounced (~300ms)** so a
+transient typo (`{{input}}` → `{{inpu}}` → corrected) doesn't thrash handles or destroy
+connected edges (see §8).
 
 ### 6.3 Pinned edge-case behavior (item 2)
 
@@ -202,8 +218,10 @@ handle recomputation is driven by state.
 | Duplicate `{{x}} {{x}}` | One handle |
 | Invalid/reserved identifier | Ignored (no handle) |
 | Whitespace inside braces | Trimmed; `{{ x }}` == `{{x}}` |
+| Reserved word (`{{ function }}`, `{{ return }}`) | Ignored — discarded via `RESERVED` Set |
 | Handle id collision | Namespaced as `${nodeId}-var-${name}` |
-| **Variable deleted while an edge is connected** | **Store prunes orphaned edges** whose `targetHandle` no longer exists (see §8) |
+| **Transient typo, corrected quickly** | Debounce (~300ms) absorbs it — handle/edge never removed |
+| **Variable genuinely deleted while an edge is connected** | After the debounce settles, **store prunes the orphaned edge** whose `targetHandle` no longer exists (see §8) |
 
 ---
 
@@ -212,23 +230,45 @@ handle recomputation is driven by state.
 ### 7.1 Frontend
 
 - `submit.jsx` reads `nodes`/`edges` from the store and calls `lib/api.js`.
-- `lib/api.js` `POST`s JSON `{ nodes, edges }` to
-  `http://localhost:8000/pipelines/parse`, with try/catch error handling (backend down
-  → friendly error in the result card, no uncaught rejection).
-- On success: **fire `window.alert()`** with a user-friendly formatted message
-  (`Nodes: 4 · Edges: 3 · Valid DAG: Yes`) **and** show the styled `ResultCard`.
+- `lib/api.js` `POST`s JSON `{ nodes, edges }` to the parse endpoint. The base URL comes
+  from **`process.env.REACT_APP_API_URL`** with a `http://localhost:8000` fallback (the
+  env seam — see §7.3), with try/catch error handling (backend down → friendly error in
+  the result card, no uncaught rejection).
+- On success: render the styled `ResultCard` first, then **fire `window.alert()`**
+  deferred via `setTimeout(…, 0)` so React commits/paints the card before the alert
+  blocks the main thread. The alert message is user-friendly
+  (`Nodes: 4 · Edges: 3 · Valid DAG: Yes`); the card is the polished surface.
 
 ### 7.2 Backend (`main.py`)
 
 - Replace the `GET` + `Form(...)` stub with a **`POST`** endpoint taking a Pydantic
   model: `Pipeline { nodes: list[Node], edges: list[Edge] }`.
+- **Referential-integrity validation:** a Pydantic model validator asserts every edge
+  `source`/`target` references a node id present in `nodes`. Malformed payloads return a
+  clean **`422`**, never a `500`. The DAG routine is additionally written defensively
+  (unknown ids can't `KeyError`).
 - Compute `num_nodes = len(nodes)`, `num_edges = len(edges)`.
 - `is_dag`: build adjacency from edges (`source -> target`) and run **Kahn's
-  algorithm**; `is_dag = True` iff all nodes are removed (no cycle remains).
-  - Empty graph → `True`. Self-loop → `False`. Parallel edges tolerated.
-- Add **CORS middleware** allowing `http://localhost:3000` (required for the
-  cross-port request).
+  algorithm**. In-degree is initialized for **every node in the payload**; all
+  in-degree-0 nodes — **including fully isolated nodes and disconnected subgraphs** —
+  seed the queue, so isolated nodes don't falsely read as a cycle. `is_dag = True` iff
+  every node is dequeued (no cycle remains).
+  - Empty graph → `True`. Self-loop → `False`. Two separate chains (`A→B`, `C→D`) →
+    `True`. Parallel edges tolerated.
 - Response: `{ "num_nodes": int, "num_edges": int, "is_dag": bool }`.
+
+### 7.3 Environment seam (local-first, deployment-ready)
+
+Network boundaries are abstracted so the app runs locally with zero config yet stays
+deployable without source changes — without gold-plating for infrastructure this
+assessment doesn't require:
+
+- **Frontend:** `REACT_APP_API_URL` (committed `.env.example`; `localhost:8000` fallback).
+- **Backend:** `CORSMiddleware` `allow_origins` read from a `CORS_ORIGINS` env var,
+  defaulting to `http://localhost:3000`.
+
+**Scope note:** cloud deployment (Vercel/EC2 wiring) is explicitly **out of scope** —
+the assessment runs locally. The seam is cheap insurance, not a deployment project.
 
 ---
 
@@ -239,9 +279,19 @@ Keep zustand. Changes:
 - **Fix the immutability bug:** the original `updateNodeField` mutates `node.data` in
   place then returns the same object. Replace with a version that returns **new node
   objects** so React/ReactFlow re-render reliably.
-- **Orphaned-edge pruning:** when a node's data changes such that a handle disappears
-  (Text variable removed), drop edges referencing the missing `sourceHandle`/
-  `targetHandle`. Centralizing this in the store keeps nodes dumb.
+- **Orphaned-edge pruning (debounce-first):** handle recomputation is debounced
+  (~300ms, §6.2), so transient typos never reach the store. Once a variable is *genuinely*
+  removed, the store drops edges referencing the now-missing `sourceHandle`/`targetHandle`.
+  Centralizing this keeps nodes dumb.
+  - *Considered and rejected for this scope:* keeping the edge and flagging it
+    `isInvalid` (render dashed/red, prune on submit). ReactFlow can't anchor an edge to a
+    handle that no longer exists, so it wouldn't render without retaining "ghost" handles
+    until submit — added complexity for marginal gain. Debounce solves the real friction
+    (quickly-corrected typos) far more cheaply.
+- **Debounce lifecycle safety:** the ~300ms recompute debounce lives in the Text node;
+  its `useEffect` cleanup **calls `.cancel()`** on unmount. Deleting a node mid-typing
+  (within the debounce window) must not fire a trailing update against a node that no
+  longer exists.
 - Add a small `removeNode` (also prunes its edges) for basic editor hygiene.
 - Selectors stay `shallow`.
 
@@ -259,10 +309,13 @@ re-measures.
 
 **Mitigation (no architecture change):** `BaseNode` calls
 `updateNodeInternals(nodeId)` (from `useUpdateNodeInternals`) inside a `useEffect`
-keyed on **(a)** the serialized handle list and **(b)** the node's measured size. Any
-handle or size change triggers exactly one re-measure. Because every node renders
-through `BaseNode`, this fix is **written once and covers all nodes** — including the 5
-new ones — for free.
+keyed on **(a)** a **stable joined-string of handle ids** (e.g. `ids.join('|')`) and
+**(b)** the node's measured size. Keying on a primitive string — never a freshly-built
+array reference — prevents the **infinite re-render loop** that occurs if the effect's
+deps fail object-equality every render. `parseVariables` is memoized on `text` (§6.2)
+to reinforce this. Any genuine handle or size change triggers exactly one re-measure.
+Because every node renders through `BaseNode`, this fix is **written once and covers all
+nodes** — including the 5 new ones — for free.
 
 **Verification:** type `{{a}}`, connect an edge to it, then add `{{b}}`; the first
 edge must stay visually attached to `a`. Resize via long text; existing edges must
@@ -305,6 +358,25 @@ the dual approach.
 
 **Mitigation:** at most one demo node (`Note`) uses `render()`; the other four are pure
 config (§4.3).
+
+### 9.8 Second-pass review hardening (items 8–13)
+
+Folded in from the engineering team's executive review:
+
+| # | Risk | Mitigation | Location |
+|---|---|---|---|
+| 8 | JS width-measurement unreliable / layout thrash | Hidden-mirror `<div>` + `ResizeObserver` feeds stable dims | §6.1 |
+| 9 | `updateNodeInternals` infinite-loop on array-ref deps | Key effect on primitive id-string; memoize `parseVariables` | §9.1, §6.2 |
+| 10 | Hardcoded URLs break any non-local run | Env seam: `REACT_APP_API_URL` + `CORS_ORIGINS` (cloud deploy stays out of scope) | §7.3 |
+| 11 | Edge referencing missing node → `500` | Pydantic referential-integrity validator → clean `422`; defensive DAG | §7.2 |
+| 12 | `alert()` blocks paint of `ResultCard` | Render card first, defer alert via `setTimeout(…, 0)` | §7.1 |
+| 13 | Aggressive edge pruning destroys edges on transient typos | Debounce (~300ms) recompute; prune only on genuine removal | §6.2, §8 |
+| 14 | `ResizeObserver` fires rapidly → canvas stutter | Coalesce callback via `requestAnimationFrame`, cancel rAF on unmount | §6.1 |
+| 15 | Debounced recompute fires after node unmount | `.cancel()` the debounce in `useEffect` cleanup | §8 |
+
+**Rejected (out of scope / wrong fit):** full cloud-deployment build-out (item 10
+scoped to the env seam only); `isInvalid`-flag edge retention (item 13 — ReactFlow can't
+anchor an edge to a removed handle; debounce is the cheaper correct fix).
 
 ---
 
