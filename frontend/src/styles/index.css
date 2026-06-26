@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .vs-node {
+    @apply bg-node rounded-node shadow-node border-t-4 min-w-[220px] text-sm text-slate-700;
+  }
+  .vs-node__header {
+    @apply px-3 py-2 font-semibold text-slate-800 border-b border-slate-100;
+  }
+  .vs-node__body { @apply p-3 flex flex-col gap-2; }
+  .vs-field { @apply flex flex-col gap-1 text-xs; }
+  .vs-field--inline { @apply flex-row items-center gap-2; }
+  .vs-field__label { @apply text-slate-500; }
+  .vs-field__control {
+    @apply border border-slate-200 rounded-md px-2 py-1 text-sm outline-none
+           focus:border-accent-io focus:ring-1 focus:ring-accent-io;
+  }
+  .vs-note {
+    @apply w-44 h-20 p-2 text-sm bg-amber-50 border border-amber-200 rounded-md outline-none resize-none;
+  }
+  .vs-toolbar { @apply px-4 py-3 bg-white border-b border-slate-200; }
+  .vs-toolbar__chips { @apply flex flex-wrap gap-2; }
+  .vs-chip {
+    @apply px-3 py-2 rounded-lg text-white text-sm font-medium cursor-grab select-none
+           shadow-sm hover:brightness-110 active:cursor-grabbing;
+  }
+  .vs-submit-bar { @apply flex justify-center py-4 bg-canvas; }
+  .vs-submit-btn {
+    @apply px-6 py-2 rounded-lg bg-accent-ai text-white font-semibold shadow
+           hover:brightness-110 active:scale-[0.98] transition;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: theme('fontFamily.sans');
+  background: theme('colors.canvas');
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
