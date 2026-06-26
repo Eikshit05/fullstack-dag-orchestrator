@@ -1,6 +1,8 @@
 // store.js
 
-import { create } from "zustand";
+// `createWithEqualityFn` keeps support for the `useStore(selector, shallow)`
+// equality-function form (the plain `create` deprecated it in zustand v4.4+).
+import { createWithEqualityFn as create } from "zustand/traditional";
 import {
     addEdge,
     applyNodeChanges,
