@@ -1,90 +1,108 @@
-# VectorShift Pipeline Builder
+# Fullstack DAG Orchestrator (Pipeline Builder)
 
-A node-based pipeline editor — **React + ReactFlow** frontend, **FastAPI** backend.
-Built for the VectorShift frontend technical assessment.
+A node-based pipeline editor built with a **React + ReactFlow** frontend and a **FastAPI** backend. This repository was engineered to fulfill the VectorShift frontend technical assessment, prioritizing scalable node abstractions, deterministic state management, and robust graph validation.
 
-## Run
+**Author:** Eikshit Singhal
 
-**Backend** (Python 3.10+):
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+* **Node.js**: v18+
+* **Python**: 3.10+
+
+### 1. Start the Backend
 
 ```bash
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload          # http://localhost:8000
+uvicorn main:app --reload
 ```
 
-**Frontend** (Node 18+):
+*The API will be available at `http://localhost:8000`.*
+
+### 2. Start the Frontend (New Terminal)
 
 ```bash
 cd frontend
 npm install
-npm start                          # http://localhost:3000
+npm start
 ```
 
-`npm start` compiles Tailwind to a static stylesheet (via `prestart`/`build:css`)
-and runs the watcher alongside `react-scripts` (see "Styling pipeline" below).
+*The application will open at `http://localhost:3000`.*
 
-## Architecture
+*(Note: `npm start` automatically triggers a `prestart` hook to compile the Tailwind CSS via CLI before launching the React development server. See "Styling Pipeline" below for architectural details.)*
 
-### Part 1 — Config-driven node abstraction
-Every node is a **declarative config** in `src/nodes/configs/` (e.g. `llm.js`), rendered
-by a single `src/nodes/BaseNode.jsx`. A config declares `title`, `category`, `fields`,
-and `handles`:
+---
 
-- **Fields** map to a renderer registry (`src/nodes/fields/`) by `kind`
-  (`text`, `textarea`, `select`, `number`, `checkbox`). Adding a field type = one entry.
-- **Handles** distribute evenly per side automatically.
-- `fields`/`handles` may be **functions of node data** for dynamic nodes, and a config
-  may supply a `render()` **escape hatch** for fully custom bodies.
+## 🏗️ Architecture & Technical Decisions
 
-Adding a node ≈ a ~15-line config + one toolbar entry. Five demo nodes (`filter`,
-`math`, `http`, `conditional`, `note`) showcase the range; only `note` uses `render()`.
+### Part 1: Config-Driven Node Abstraction
 
-### Part 2 — Unified design
-A token-driven Tailwind design system (`tailwind.config.js`): per-category accent colors,
-radii, shadows. Changing a category color updates every node and toolbar chip in one place.
+Nodes are treated as declarative data rather than hardcoded React components. Every node is defined by a configuration file in `src/nodes/configs/` (e.g., `llm.js`), which is rendered by a singular `BaseNode.jsx`.
 
-### Part 3 — Text node
-`src/nodes/TextNodeBody.jsx`:
-- **Auto-resize** via a hidden-mirror `<div>` + `ResizeObserver` (rAF-throttled), so the
-  browser's layout engine computes width/height — no brittle JS text measurement.
-- **`{{variable}}` handles**: `src/lib/parseVariables.js` extracts valid, unique,
-  non-reserved identifiers; each becomes a left-side input handle. Recomputation is
-  **debounced (~300ms)** (so transient typos don't thrash), orphaned edges are pruned on
-  genuine removal, and `updateNodeInternals` keeps edges anchored as handles/size change.
+* **Field Registry:** Input fields map to a renderer registry (`src/nodes/fields/`) via a `kind` property (`text`, `select`, `checkbox`, etc.). Adding a new field type requires exactly one registry entry.
+* **Dynamic Handles:** Handles distribute evenly per side automatically. Both `fields` and `handles` can accept functions of node data for dynamic rendering, and a config may supply a `render()` escape hatch for fully custom bodies.
+* **Demonstration:** Five custom nodes (`filter`, `math`, `http`, `conditional`, `note`) are included to showcase the abstraction's flexibility; only `note` uses the `render()` escape hatch.
 
-### Part 4 — Backend integration
-`POST /pipelines/parse` accepts `{nodes, edges}` and returns
-`{num_nodes, num_edges, is_dag}`. The DAG check uses **Kahn's algorithm** (in-degree-0
-nodes — including isolated/disconnected ones — seed the queue). A Pydantic validator
-rejects edges referencing unknown nodes with a clean `422` (never a `500`). CORS origins
-come from the `CORS_ORIGINS` env var (defaults to `http://localhost:3000`).
+### Part 2: Unified Design System
 
-**Submit feedback:** clicking Submit fires a native `window.alert()` with the results
-(the assessment's literal requirement) **and** shows a styled result modal
-(`ResultCard`) for a user-friendly presentation. The alert is deferred via
-`setTimeout(0)` so the modal paints first.
+The UI utilizes a token-driven Tailwind design system configured in `tailwind.config.js`. Category accent colors, radii, and shadows are centralized. Modifying a category token updates all corresponding nodes and toolbar elements globally.
 
-## Styling pipeline (note)
+### Part 3: Text Node Mechanics
 
-react-scripts 5 silently drops PostCSS plugins injected through CRACO, so Tailwind never
-ran in the webpack bundle. Rather than fight that black box, Tailwind is **precompiled
-with its own CLI** (`src/styles/index.css` → `src/styles/tailwind-out.css`, gitignored)
-and imported as plain CSS — deterministic, and the app still runs with standard
-`npm start` / `npm run build`.
+The text node (`src/nodes/TextNodeBody.jsx`) is hardened against common canvas UI bugs:
 
-## Configuration
+* **Auto-Resize via Hidden Mirror:** Instead of brittle JavaScript text-width calculations, the node utilizes a hidden-mirror `<div>` combined with an rAF-throttled `ResizeObserver`. The browser's native layout engine computes the geometry, preventing layout thrashing during canvas zoom/pan.
+* **Variable Extraction:** `{{variable}}` handles are extracted via `src/lib/parseVariables.js`, which filters for valid, unique, non-reserved JavaScript identifiers.
+* **Debounced State:** Recomputation is debounced (~300ms) to prevent transient typos from destroying existing edges. `updateNodeInternals` is tightly controlled to keep edges visually anchored as the node resizes.
 
-- Frontend: `frontend/.env.example` → copy to `.env` to override `REACT_APP_API_URL`.
-- Backend: `CORS_ORIGINS` env var (comma-separated) to allow additional origins.
+### Part 4: Backend Integration & Graph Validation
 
-## Tests
+The backend exposes `POST /pipelines/parse`, accepting a JSON payload of nodes and edges.
+
+* **Referential Integrity:** A Pydantic validator intercepts edges referencing non-existent nodes, returning a clean `422 Unprocessable Entity` rather than throwing a `500 Internal Server Error`.
+* **Kahn’s Algorithm:** Directed Acyclic Graph (DAG) validation is computed linearly. The algorithm initializes the in-degree array for *all* nodes in the payload, ensuring disconnected subgraphs and isolated nodes do not falsely trigger cycle detections.
+* **Submit Feedback:** Pipeline submission triggers both a native `window.alert()` (satisfying strict assessment criteria) and a polished UI modal (`ResultCard`). The alert is deferred via `setTimeout(..., 0)` to prevent main-thread blocking before the React commit/paint cycle completes.
+
+---
+
+## ⚙️ Configuration & Tooling
+
+### Styling Pipeline
+
+`react-scripts@5` silently drops external PostCSS plugins injected via CRACO, breaking Tailwind compilation in standard CRA setups. To maintain build determinism without ejecting or fighting Webpack internals, Tailwind is **precompiled via its own CLI**.
+
+* `src/styles/index.css` is compiled to `src/styles/tailwind-out.css` (gitignored) prior to Webpack bundling.
+* Standard `npm start` and `npm run build` commands function seamlessly via `concurrently`.
+
+### Environment Variables
+
+* **Frontend:** Copy `frontend/.env.example` to `frontend/.env` to override `REACT_APP_API_URL`.
+* **Backend:** Define `CORS_ORIGINS` (comma-separated) to authorize external frontend deployments.
+
+---
+
+## 🧪 Testing
+
+The logic-heavy surfaces are covered by focused test suites.
+
+**Frontend (Variable Parsing):**
 
 ```bash
-# Frontend — parseVariables
-cd frontend && CI=true npm test -- --watchAll=false
+cd frontend
+CI=true npm test -- --watchAll=false
+```
 
-# Backend — DAG algorithm (empty, chain, self-loop, cycle, diamond, disconnected, isolated)
-cd backend && source .venv/bin/activate && python -m pytest -v
+**Backend (DAG Algorithm):**
+*Tests cover empty graphs, simple chains, self-loops, standard cycles, diamond patterns, disconnected components, and isolated nodes.*
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m pytest -v
 ```
