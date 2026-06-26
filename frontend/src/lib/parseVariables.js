@@ -5,7 +5,8 @@ const RESERVED = new Set([
   'function', 'goto', 'if', 'implements', 'import', 'in', 'instanceof', 'int', 'interface',
   'let', 'long', 'native', 'new', 'null', 'package', 'private', 'protected', 'public',
   'return', 'short', 'static', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
-  'transient', 'true', 'try', 'typeof', 'var', 'void', 'volatile', 'while', 'with', 'yield',
+  'transient', 'true', 'try', 'typeof', 'undefined', 'var', 'void', 'volatile',
+  'while', 'with', 'yield',
 ]);
 
 /**
@@ -13,7 +14,7 @@ const RESERVED = new Set([
  * Returns names in first-seen order.
  */
 export function parseVariables(text) {
-  if (!text) return [];
+  if (!text || typeof text !== 'string') return [];
   const re = /\{\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}\}/g;
   const seen = new Set();
   const result = [];
