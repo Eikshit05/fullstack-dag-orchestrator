@@ -1,0 +1,36 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Backend Testing
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+      - name: Run Backend Tests
+        run: |
+          cd backend
+          python -m pytest tests/ -v
+
+      # Frontend Testing
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm install
+      - name: Run Frontend Tests
+        run: |
+          cd frontend
+          CI=true npm test -- --watchAll=false

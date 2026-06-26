@@ -1,5 +1,7 @@
 # Fullstack DAG Orchestrator (Pipeline Builder)
 
+[![CI](https://github.com/Eikshit05/fullstack-dag-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Eikshit05/fullstack-dag-orchestrator/actions/workflows/ci.yml)
+
 A node-based pipeline editor built with a **React + ReactFlow** frontend and a **FastAPI** backend. This repository was engineered to fulfill the VectorShift frontend technical assessment, prioritizing scalable node abstractions, deterministic state management, and robust graph validation.
 
 **Author:** Eikshit Singhal
