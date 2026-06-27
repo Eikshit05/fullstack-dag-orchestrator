@@ -75,6 +75,10 @@ export function BaseNode({ id, data, config }) {
                   field={f}
                   value={data[f.name] ?? fallback ?? ''}
                   onChange={(v) => updateNodeField(id, f.name, v)}
+                  // Extras for compound fields (e.g. providerModel manages two keys).
+                  data={data}
+                  nodeId={id}
+                  updateNodeField={updateNodeField}
                 />
               );
             })}

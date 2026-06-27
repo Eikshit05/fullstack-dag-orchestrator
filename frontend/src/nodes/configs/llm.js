@@ -3,7 +3,7 @@ export const llmConfig = {
   title: 'LLM',
   category: 'ai',
   fields: [
-    { name: 'model', label: 'Model', kind: 'select', options: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'], default: 'gpt-4o-mini' },
+    { name: 'provider', kind: 'providerModel' },
   ],
   handles: [
     { id: 'system', type: 'target', position: 'left', dataType: 'Text' },

@@ -103,7 +103,7 @@ class RunEdgeModel(BaseModel):
 class RunPipeline(BaseModel):
     nodes: list[RunNodeModel]
     edges: list[RunEdgeModel]
-    apiKey: str | None = None  # single key shared by all AI nodes (BYOK)
+    apiKeys: dict = {}  # one key per provider: {openai, anthropic, google}
 
 
 def topological_order(nodes, edges):
@@ -190,22 +190,38 @@ def _scrape_url(url):
     return body[:8000]  # cap payload so a huge page can't flood the graph
 
 
-def _node_api_key(node, default_key):
-    """The key an AI node should use: its own (rare override) else the shared key."""
-    return (node.data or {}).get("apiKey") or default_key
+def _provider_and_key(node, api_keys):
+    """An AI node's selected provider (lowercased) and the matching global key.
+    Phase 1 wires OpenAI; Anthropic/Google are validated but routed in Phase 2."""
+    provider = ((node.data or {}).get("provider") or "OpenAI").lower()
+    key = (api_keys or {}).get(provider)
+    return provider, key
 
 
-def _run_llm(node, prompt, system, default_key=None):
-    """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
-    (and the test suite) runs without `openai` installed or any key configured."""
-    data = node.data or {}
-    api_key = _node_api_key(node, default_key)
-    model = data.get("model") or "gpt-4o-mini"
+def _require_ai(node, api_keys, action):
+    """Shared guard for AI nodes: resolve provider + key, fail cleanly if missing
+    or if the provider isn't wired yet."""
+    provider, api_key = _provider_and_key(node, api_keys)
+    label = provider.title()
+    if provider != "openai":
+        raise HTTPException(
+            status_code=501,
+            detail=f"{label} routing isn't wired yet — select OpenAI to {action} (multi-provider backend is the next phase).",
+        )
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="Execution paused: add your OpenAI API key in the toolbar to run the LLM step.",
+            detail=f"Execution paused: add your {label} API key in Settings (⚙️) to {action}.",
         )
+    return provider, api_key
+
+
+def _run_llm(node, prompt, system, api_keys=None):
+    """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
+    (and the test suite) runs without `openai` installed or any key configured."""
+    data = node.data or {}
+    _provider, api_key = _require_ai(node, api_keys, "run the LLM step")
+    model = data.get("model") or "gpt-4o-mini"
     try:
         from openai import OpenAI
     except ImportError:
@@ -252,21 +268,16 @@ def build_extract_schema(fields):
     }
 
 
-def _run_extract(node, text, default_key=None):
+def _run_extract(node, text, api_keys=None):
     """Extract Data executor: build a JSON Schema from the node's fields, call the
     LLM in structured-output mode, and return a {field-<name>: value} dict so each
     value lands on its own typed output handle. BYOK, lazy OpenAI import."""
     data = node.data or {}
     fields = data.get("fields") or []
-    api_key = _node_api_key(node, default_key)
-    model = data.get("model") or "gpt-4o-mini"
     if not fields:
         raise HTTPException(status_code=400, detail=f"Extract node '{node.id}' has no schema fields defined.")
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="Execution paused: add your OpenAI API key in the toolbar to run extraction.",
-        )
+    _provider, api_key = _require_ai(node, api_keys, "run extraction")
+    model = data.get("model") or "gpt-4o-mini"
     try:
         from openai import OpenAI
     except ImportError:
@@ -340,11 +351,11 @@ def run_pipeline(pipeline: RunPipeline):
         elif node.type == "llm":
             prompt = _input_by_suffix(ins, "prompt", context)
             system = _input_by_suffix(ins, "system", context)
-            context[nid] = _run_llm(node, prompt, system, pipeline.apiKey)
+            context[nid] = _run_llm(node, prompt, system, pipeline.apiKeys)
 
         elif node.type == "extract":
             text = _input_by_suffix(ins, "context", context) or ""
-            context[nid] = _run_extract(node, text, pipeline.apiKey)  # {f"field-{name}": value}
+            context[nid] = _run_extract(node, text, pipeline.apiKeys)  # {f"field-{name}": value}
 
         elif node.type == "customOutput":
             value = _input_by_suffix(ins, "value", context)

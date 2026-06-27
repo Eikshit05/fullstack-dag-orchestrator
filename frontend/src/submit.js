@@ -33,7 +33,7 @@ export const SubmitButton = () => {
     setRunError(null);
     setRunning(true);
     try {
-      const data = await runPipeline(nodes, edges, useStore.getState().apiKey);
+      const data = await runPipeline(nodes, edges, useStore.getState().apiKeys);
       setRun(data); // execution output (Scrape/Input -> Text -> LLM -> Extract -> Output)
     } catch (e) {
       setRunError(e.message); // missing key / cycle / network — surfaced cleanly

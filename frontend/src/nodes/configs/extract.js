@@ -13,7 +13,7 @@ export const extractConfig = {
   title: 'Extract Data',
   category: 'ai',
   fields: [
-    { name: 'model', label: 'Model', kind: 'select', options: ['gpt-4o-mini', 'gpt-4o'], default: 'gpt-4o-mini' },
+    { name: 'provider', kind: 'providerModel' },
     { name: 'fields', label: 'Schema', kind: 'schema', default: [] },
   ],
   // One target for the source text + one typed source handle per schema field.
