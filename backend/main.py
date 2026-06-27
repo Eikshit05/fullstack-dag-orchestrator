@@ -495,6 +495,21 @@ def run_pipeline(pipeline: RunPipeline):
                     text = text.replace("{{" + var + "}}", str(_resolve(context, source, s_suffix)))
             context[nid] = text
 
+        elif node.type == "textFormatter":
+            text = str(_input_by_suffix(ins, "input", context) or "")
+            action = data.get("action", "Uppercase")
+            if action == "Lowercase":
+                context[nid] = text.lower()
+            elif action == "Title Case":
+                context[nid] = text.title()
+            else:
+                context[nid] = text.upper()
+
+        elif node.type == "splitText":
+            text = str(_input_by_suffix(ins, "input", context) or "")
+            delimiter = data.get("delimiter") or ","
+            context[nid] = [part.strip() for part in text.split(delimiter)]
+
         elif node.type == "scrape":
             url = _input_by_suffix(ins, "url", context) or data.get("url")
             context[nid] = _scrape_url(url)

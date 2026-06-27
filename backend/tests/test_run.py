@@ -316,6 +316,40 @@ def test_llm_without_api_key_returns_400():
     assert "API key" in res.json()["detail"]
 
 
+def test_text_formatter_uppercases():
+    payload = {
+        "nodes": [
+            node("customInput-1", "customInput", value="acme corp"),
+            node("textFormatter-1", "textFormatter", action="Uppercase"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "textFormatter-1", "input"),
+            edge("textFormatter-1", "output", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 200
+    assert res.json()["outputs"]["out"] == "ACME CORP"
+
+
+def test_split_text_splits_on_delimiter():
+    payload = {
+        "nodes": [
+            node("customInput-1", "customInput", value="a, b , c"),
+            node("splitText-1", "splitText", delimiter=","),
+            node("customOutput-1", "customOutput", outputName="parts"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "splitText-1", "input"),
+            edge("splitText-1", "list", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 200
+    assert res.json()["outputs"]["parts"] == ["a", "b", "c"]
+
+
 def test_cycle_returns_400():
     """A cyclic graph is rejected before execution (node type is irrelevant)."""
     payload = {
