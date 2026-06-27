@@ -1,8 +1,53 @@
 from fastapi.testclient import TestClient
 
-from main import app, _strip_html
+from main import app, _strip_html, build_extract_schema
 
 client = TestClient(app)
+
+
+def test_build_extract_schema_maps_types():
+    fields = [
+        {"name": "company", "type": "Text"},
+        {"name": "revenue", "type": "Decimal", "description": "annual revenue"},
+        {"name": "is_public", "type": "Boolean"},
+        {"name": "risks", "type": "List"},
+        {"name": "", "type": "Text"},  # blank name is skipped
+    ]
+    schema = build_extract_schema(fields)
+    assert schema["properties"]["company"]["type"] == "string"
+    assert schema["properties"]["revenue"]["type"] == "number"
+    assert schema["properties"]["revenue"]["description"] == "annual revenue"
+    assert schema["properties"]["is_public"]["type"] == "boolean"
+    assert schema["properties"]["risks"] == {"type": "array", "items": {"type": "string"}}
+    assert "" not in schema["properties"]
+    assert schema["required"] == ["company", "revenue", "is_public", "risks"]
+    assert schema["additionalProperties"] is False
+
+
+def test_extract_without_fields_returns_400():
+    payload = {
+        "nodes": [
+            node("customInput-1", "customInput", value="some text"),
+            node("extract-1", "extract", model="gpt-4o-mini", apiKey="sk-x", fields=[]),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [edge("customInput-1", "value", "extract-1", "context")],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 400
+    assert "no schema fields" in res.json()["detail"]
+
+
+def test_extract_without_api_key_returns_400():
+    payload = {
+        "nodes": [
+            node("extract-1", "extract", model="gpt-4o-mini", fields=[{"name": "x", "type": "Text"}]),
+        ],
+        "edges": [],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 400
+    assert "API key" in res.json()["detail"]
 
 
 def test_strip_html_extracts_readable_text():
