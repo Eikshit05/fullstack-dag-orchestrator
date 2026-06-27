@@ -3,7 +3,8 @@ export const llmConfig = {
   title: 'LLM',
   category: 'ai',
   fields: [
-    { name: 'model', label: 'Model', kind: 'select', options: ['gpt-4o', 'claude-opus-4'], default: 'gpt-4o' },
+    { name: 'model', label: 'Model', kind: 'select', options: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'], default: 'gpt-4o-mini' },
+    { name: 'apiKey', label: 'OpenAI API Key', kind: 'password', placeholder: 'sk-...', default: '' },
   ],
   handles: [
     { id: 'system', type: 'target', position: 'left' },

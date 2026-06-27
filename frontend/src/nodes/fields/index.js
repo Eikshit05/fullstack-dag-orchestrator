@@ -3,6 +3,7 @@ import { TextAreaField } from './TextAreaField';
 import { SelectField } from './SelectField';
 import { NumberField } from './NumberField';
 import { CheckboxField } from './CheckboxField';
+import { PasswordField } from './PasswordField';
 
 export const FIELD_COMPONENTS = {
   text: TextField,
@@ -10,4 +11,5 @@ export const FIELD_COMPONENTS = {
   select: SelectField,
   number: NumberField,
   checkbox: CheckboxField,
+  password: PasswordField,
 };
