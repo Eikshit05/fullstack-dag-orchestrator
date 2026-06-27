@@ -1,4 +1,6 @@
+import html as html_lib
 import os
+import re
 from collections import deque
 
 from fastapi import FastAPI, HTTPException
@@ -139,6 +141,43 @@ def _input_by_suffix(ins, suffix, context):
     return None
 
 
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _strip_html(markup):
+    """Reduce an HTML document to readable text: drop script/style, strip tags,
+    unescape entities, collapse whitespace. Pure + unit-tested."""
+    text = _SCRIPT_STYLE_RE.sub(" ", markup)
+    text = _TAG_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text)
+    return html_lib.unescape(text).strip()
+
+
+def _scrape_url(url):
+    """Fetch a URL and return its readable text (JSON passes through verbatim)."""
+    if not url or url.strip() in ("", "https://", "http://"):
+        raise HTTPException(status_code=400, detail="Scrape node has no URL to fetch.")
+    try:
+        import httpx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="The 'httpx' package is not installed on the server.")
+    try:
+        resp = httpx.get(
+            url, timeout=10.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (pipeline-scraper)"},
+        )
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as exc:  # DNS, timeout, HTTP error — surface cleanly
+        raise HTTPException(status_code=502, detail=f"Scrape failed for {url}: {exc}")
+    content_type = resp.headers.get("content-type", "")
+    body = resp.text if "application/json" in content_type else _strip_html(resp.text)
+    return body[:8000]  # cap payload so a huge page can't flood the graph
+
+
 def _run_llm(node, prompt, system):
     """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
     (and the test suite) runs without `openai` installed or any key configured."""
@@ -200,6 +239,10 @@ def run_pipeline(pipeline: RunPipeline):
                     var = suffix[len("var-"):]
                     text = text.replace("{{" + var + "}}", str(context.get(source, "")))
             context[nid] = text
+
+        elif node.type == "scrape":
+            url = _input_by_suffix(ins, "url", context) or data.get("url")
+            context[nid] = _scrape_url(url)
 
         elif node.type == "llm":
             prompt = _input_by_suffix(ins, "prompt", context)

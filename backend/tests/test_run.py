@@ -1,8 +1,30 @@
 from fastapi.testclient import TestClient
 
-from main import app
+from main import app, _strip_html
 
 client = TestClient(app)
+
+
+def test_strip_html_extracts_readable_text():
+    markup = (
+        "<html><head><style>.x{color:red}</style></head>"
+        "<body><h1>Title</h1><p>Hello &amp; welcome</p>"
+        "<script>track()</script></body></html>"
+    )
+    assert _strip_html(markup) == "Title Hello & welcome"
+
+
+def test_scrape_without_url_returns_400():
+    payload = {
+        "nodes": [
+            node("scrape-1", "scrape", url="https://"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [edge("scrape-1", "content", "customOutput-1", "value")],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 400
+    assert "no URL" in res.json()["detail"]
 
 
 def node(nid, ntype, **data):
