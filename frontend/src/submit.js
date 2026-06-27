@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useStore } from './store';
 import { shallow } from 'zustand/shallow';
-import { parsePipeline, runPipeline } from './lib/api';
+import { parsePipeline, runPipeline, explainPipeline } from './lib/api';
 import { ResultCard } from './components/ResultCard';
 import { RunResultCard } from './components/RunResultCard';
 
@@ -16,6 +16,11 @@ export const SubmitButton = () => {
   const [run, setRun] = useState(null);
   const [runError, setRunError] = useState(null);
   const [running, setRunning] = useState(false);
+  const [explanation, setExplanation] = useState(null);
+  const [explainError, setExplainError] = useState(null);
+  const [explaining, setExplaining] = useState(false);
+
+  const resetExplain = () => { setExplanation(null); setExplainError(null); };
 
   const onSubmit = async () => {
     setError(null);
@@ -31,6 +36,7 @@ export const SubmitButton = () => {
   const onRun = async () => {
     setRun(null);
     setRunError(null);
+    resetExplain(); // a fresh run invalidates any prior explanation
     setRunning(true);
     try {
       const data = await runPipeline(nodes, edges, useStore.getState().apiKeys);
@@ -39,6 +45,19 @@ export const SubmitButton = () => {
       setRunError(e.message); // missing key / cycle / network — surfaced cleanly
     } finally {
       setRunning(false);
+    }
+  };
+
+  const onExplain = async () => {
+    setExplainError(null);
+    setExplaining(true);
+    try {
+      const data = await explainPipeline(nodes, edges, run?.context || {}, useStore.getState().apiKeys);
+      setExplanation(data); // { summary, steps: [{ node_id, action }] }
+    } catch (e) {
+      setExplainError(e.message);
+    } finally {
+      setExplaining(false);
     }
   };
 
@@ -56,7 +75,11 @@ export const SubmitButton = () => {
       <RunResultCard
         run={run}
         error={runError}
-        onClose={() => { setRun(null); setRunError(null); }}
+        onClose={() => { setRun(null); setRunError(null); resetExplain(); }}
+        onExplain={onExplain}
+        explanation={explanation}
+        explaining={explaining}
+        explainError={explainError}
       />
     </div>
   );

@@ -40,3 +40,26 @@ export async function runPipeline(nodes, edges, apiKeys) {
   }
   return data;
 }
+
+export async function explainPipeline(nodes, edges, context, apiKeys) {
+  const res = await fetch(`${BASE_URL}/pipelines/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKeys,
+      context, // the memory bus from the last run
+      nodes: nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+      edges: edges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      })),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || `Backend responded ${res.status}`);
+  }
+  return data; // { summary, steps: [{ node_id, action }] }
+}
