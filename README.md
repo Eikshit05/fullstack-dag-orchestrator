@@ -86,7 +86,7 @@ Each AI node picks its own brain — cheap model for triage, a heavier one for s
 
 * **Provider → Model on the node** (pipeline logic, exported with the graph): a `providerModel` compound field; the model list follows the provider and resets to a valid option on change.
 * **Keys are global, not per-node** (credentials): one key per provider in the **⚙️ Settings** vault, persisted to `localStorage`, injected into the run payload only at execution time — **never written into a node**, so they can't leak through Export.
-* **Status:** OpenAI is wired end-to-end (LLM + Extract). Anthropic/Google are selectable and return a clean `501 "routing isn't wired yet"` until the multi-SDK backend lands (see Roadmap).
+* **Backend:** a provider-adapter registry (`PROVIDERS`) — each provider exposes `chat()` and `extract()`, dispatched by the node's selected provider. SDKs are lazy-imported; errors normalize to clean `400/502`. Structured output is per-provider: OpenAI `response_format`, Anthropic forced tool-use, Google `response_schema`. OpenAI is verified live end-to-end; Anthropic and Google are wired and unit-routed (live calls need those keys).
 
 ### 5. Scrape URL & Extract Data
 * **Scrape:** `httpx.get` with timeout + redirects; JSON passes through, otherwise a regex stripper reduces HTML to text (no BeautifulSoup). DNS/timeout/HTTP errors → clean `502`.
@@ -145,5 +145,5 @@ cd backend && source .venv/bin/activate && python -m pytest -v
 
 ## 🗺️ Roadmap
 
-* **Phase 2 — multi-SDK backend:** wire Anthropic (`anthropic`) and Google (`google-generativeai`) with per-provider structured-output adapters (OpenAI `response_format`, Anthropic tool-use, Gemini `response_schema`), so the provider dropdowns light up end-to-end.
-* Optional: a "reader mode" for Scrape (Jina Reader) and persisted pipelines.
+* **Multi-SDK backend — done:** Anthropic (`anthropic`) and Google (`google-generativeai`) are wired alongside OpenAI via the adapter registry, each with its own structured-output mechanism. OpenAI is verified live; the other two need their respective keys to exercise end-to-end.
+* Optional next: a "reader mode" for Scrape (Jina Reader), persisted pipelines, and live validation of the Anthropic/Google paths.
