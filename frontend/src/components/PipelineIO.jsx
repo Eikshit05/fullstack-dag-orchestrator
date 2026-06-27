@@ -5,6 +5,7 @@
 
 import { useRef } from 'react';
 import { useStore } from '../store';
+import { sanitizeNodesForExport } from '../lib/pipelineExport';
 
 export function PipelineIO() {
   const fileInputRef = useRef(null);
@@ -12,9 +13,11 @@ export function PipelineIO() {
   const handleExport = () => {
     // Read non-reactively: we only need the snapshot at click time.
     const { nodes, edges } = useStore.getState();
-    const blob = new Blob([JSON.stringify({ nodes, edges }, null, 2)], {
-      type: 'application/json',
-    });
+    // Scrub secrets (LLM apiKey) so they never land in the downloaded file.
+    const blob = new Blob(
+      [JSON.stringify({ nodes: sanitizeNodesForExport(nodes), edges }, null, 2)],
+      { type: 'application/json' }
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

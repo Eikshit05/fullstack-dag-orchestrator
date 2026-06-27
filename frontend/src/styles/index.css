@@ -38,10 +38,15 @@
     @apply px-3 py-2 rounded-lg text-white text-sm font-medium cursor-grab select-none
            shadow-sm hover:brightness-110 active:cursor-grabbing;
   }
-  .vs-submit-bar { @apply flex justify-center py-4 bg-canvas; }
+  .vs-submit-bar { @apply flex justify-center gap-3 py-4 bg-canvas; }
   .vs-submit-btn {
     @apply px-6 py-2 rounded-lg bg-accent-ai text-white font-semibold shadow
            hover:brightness-110 active:scale-[0.98] transition;
+  }
+  .vs-run-btn {
+    @apply px-6 py-2 rounded-lg bg-emerald-500 text-white font-semibold shadow
+           hover:brightness-110 active:scale-[0.98] transition
+           disabled:opacity-60 disabled:cursor-not-allowed;
   }
   .vs-cmdk__overlay { @apply fixed inset-0 bg-black/30 z-40; }
   .vs-cmdk__content {
