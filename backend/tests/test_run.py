@@ -81,6 +81,66 @@ def test_malformed_api_key_rejected_cleanly():
     assert "looks invalid" in res.json()["detail"]
 
 
+def _llm_payload(provider, key):
+    return {
+        "apiKeys": {provider.lower(): key},
+        "nodes": [
+            node("customInput-1", "customInput", value="hi"),
+            node("llm-1", "llm", provider=provider, model="gpt-4o-mini"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "llm-1", "prompt"),
+            edge("llm-1", "response", "customOutput-1", "value"),
+        ],
+    }
+
+
+def test_rejected_key_returns_friendly_401(monkeypatch):
+    """A provider rejecting the key (401) becomes a clean, friendly 401."""
+    class FakeAuthError(Exception):
+        status_code = 401
+
+    def boom(*a, **k):
+        raise FakeAuthError("Error code: 401 - Incorrect API key provided: sk-xxx")
+
+    monkeypatch.setitem(main.PROVIDERS["openai"], "chat", boom)
+    res = client.post("/pipelines/run", json=_llm_payload("OpenAI", "sk-wrong"))
+    assert res.status_code == 401
+    assert "was rejected" in res.json()["detail"]
+
+
+def test_auth_error_detected_from_message_only(monkeypatch):
+    """Google-style errors carry no status_code — detection falls back to text."""
+    monkeypatch.setitem(main.PROVIDERS["google"], "chat",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("API key not valid. Please pass a valid API key.")))
+    payload = _llm_payload("OpenAI", "x")  # reshape for google
+    payload = {
+        "apiKeys": {"google": "AIza-bad"},
+        "nodes": [
+            node("customInput-1", "customInput", value="hi"),
+            node("llm-1", "llm", provider="Google", model="gemini-3.5-flash"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "llm-1", "prompt"),
+            edge("llm-1", "response", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 401
+    assert "Google" in res.json()["detail"]
+
+
+def test_non_auth_error_still_returns_502(monkeypatch):
+    """A genuine network/other error stays a 502, not a misleading 401."""
+    monkeypatch.setitem(main.PROVIDERS["openai"], "chat",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("connection reset by peer")))
+    res = client.post("/pipelines/run", json=_llm_payload("OpenAI", "sk-realish"))
+    assert res.status_code == 502
+    assert "API error" in res.json()["detail"]
+
+
 def test_build_extract_schema_maps_types():
     fields = [
         {"name": "company", "type": "Text"},
