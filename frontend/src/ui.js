@@ -2,17 +2,21 @@
 // Displays the drag-and-drop UI
 // --------------------------------------------------
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import ReactFlow, { Controls, Background, MiniMap } from 'reactflow';
 import { useStore } from './store';
 import { shallow } from 'zustand/shallow';
 import { NODE_CONFIGS } from './nodes/configs';
 import { createNodeComponent } from './nodes/createNodeComponent';
+import { findCyclicEdgeIds } from './lib/graph';
 
 import 'reactflow/dist/style.css';
 
 const gridSize = 20;
 const proOptions = { hideAttribution: true };
+// Edges that form a cycle are rendered red + dashed. Styling is derived at render
+// (see styledEdges) so the canonical store edges — and any JSON export — stay clean.
+const CYCLE_EDGE_STYLE = { stroke: '#ef4444', strokeWidth: 2, strokeDasharray: '5,5' };
 const nodeTypes = Object.fromEntries(
   Object.entries(NODE_CONFIGS).map(([type, cfg]) => [type, createNodeComponent(cfg)])
 );
@@ -39,6 +43,16 @@ export const PipelineUI = () => {
       onEdgesChange,
       onConnect
     } = useStore(selector, shallow);
+
+    // Derive cycle styling without touching store state. Recomputes on every edge
+    // change, so deleting an edge that breaks a cycle clears the red automatically.
+    const styledEdges = useMemo(() => {
+      const cyclic = findCyclicEdgeIds(edges);
+      if (cyclic.size === 0) return edges;
+      return edges.map((e) =>
+        cyclic.has(e.id) ? { ...e, style: CYCLE_EDGE_STYLE, animated: true } : e
+      );
+    }, [edges]);
 
     const getInitNodeData = (nodeID, type) => {
       let nodeData = { id: nodeID, nodeType: `${type}` };
@@ -88,7 +102,7 @@ export const PipelineUI = () => {
         <div ref={reactFlowWrapper} style={{width: '100%', height: '70vh'}}>
             <ReactFlow
                 nodes={nodes}
-                edges={edges}
+                edges={styledEdges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
