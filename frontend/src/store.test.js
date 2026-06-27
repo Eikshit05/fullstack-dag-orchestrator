@@ -6,7 +6,8 @@ describe('Zustand Store Mechanics', () => {
     useStore.setState({
       nodes: [],
       edges: [],
-      nodeIDs: {}
+      nodeIDs: {},
+      clipboard: { nodes: [], edges: [] }
     });
   });
 
@@ -99,6 +100,83 @@ describe('Zustand Store Mechanics', () => {
 
     // No numeric suffix found -> counter starts fresh at 1.
     expect(useStore.getState().getNodeID('customInput')).toBe('customInput-1');
+  });
+
+  it('copySelection captures selected nodes and only their internal edges', () => {
+    useStore.setState({
+      nodes: [
+        { id: 'math-1', type: 'math', position: { x: 0, y: 0 }, data: {}, selected: true },
+        { id: 'math-2', type: 'math', position: { x: 0, y: 0 }, data: {}, selected: true },
+        { id: 'out-1', type: 'customOutput', position: { x: 0, y: 0 }, data: {}, selected: false },
+      ],
+      edges: [
+        { id: 'e-internal', source: 'math-1', target: 'math-2' },
+        { id: 'e-external', source: 'math-2', target: 'out-1' }, // crosses the selection boundary
+      ],
+    });
+
+    useStore.getState().copySelection();
+    const { nodes, edges } = useStore.getState().clipboard;
+
+    expect(nodes.map((n) => n.id)).toEqual(['math-1', 'math-2']);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].id).toBe('e-internal');
+  });
+
+  it('pasteClipboard clones the subgraph with fresh ids, offset, and remapped wiring', () => {
+    useStore.setState({
+      nodes: [
+        { id: 'math-1', type: 'math', position: { x: 100, y: 100 }, data: { id: 'math-1' }, selected: true },
+        { id: 'math-2', type: 'math', position: { x: 200, y: 100 }, data: { id: 'math-2' }, selected: true },
+      ],
+      edges: [
+        {
+          id: 'e1',
+          source: 'math-1',
+          target: 'math-2',
+          sourceHandle: 'math-1-output',
+          targetHandle: 'math-2-a',
+        },
+      ],
+      nodeIDs: { math: 2 },
+    });
+
+    const store = useStore.getState();
+    store.copySelection();
+    store.pasteClipboard();
+
+    const state = useStore.getState();
+
+    // 2 originals + 2 pasted.
+    expect(state.nodes).toHaveLength(4);
+    const pasted = state.nodes.filter((n) => n.selected);
+    const originals = state.nodes.filter((n) => !n.selected);
+
+    // Only the fresh copies remain selected.
+    expect(pasted.map((n) => n.id)).toEqual(['math-3', 'math-4']);
+    expect(originals.map((n) => n.id)).toEqual(['math-1', 'math-2']);
+
+    // Diagonal offset applied.
+    const p1 = pasted.find((n) => n.id === 'math-3');
+    expect(p1.position).toEqual({ x: 140, y: 140 });
+    // Embedded data id follows the new node id.
+    expect(p1.data.id).toBe('math-3');
+
+    // The internal edge is duplicated and rewired end-to-end, handles included.
+    expect(state.edges).toHaveLength(2);
+    const newEdge = state.edges.find((e) => e.id !== 'e1');
+    expect(newEdge.source).toBe('math-3');
+    expect(newEdge.target).toBe('math-4');
+    expect(newEdge.sourceHandle).toBe('math-3-output');
+    expect(newEdge.targetHandle).toBe('math-4-a');
+  });
+
+  it('pasteClipboard is a no-op when the clipboard is empty', () => {
+    useStore.setState({
+      nodes: [{ id: 'math-1', type: 'math', position: { x: 0, y: 0 }, data: {}, selected: true }],
+    });
+    useStore.getState().pasteClipboard();
+    expect(useStore.getState().nodes).toHaveLength(1);
   });
 
   it('prunes only edges whose variable handle was removed (syncNodeHandles)', () => {
