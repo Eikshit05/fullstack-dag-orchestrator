@@ -96,8 +96,9 @@ Each AI node picks its own brain — cheap model for triage, a heavier one for s
 The original assessment endpoint, intact: returns `{num_nodes, num_edges, is_dag}` (Kahn's, seeding all in-degree-0 nodes so isolated/disconnected nodes don't false-trigger), with a Pydantic validator rejecting edges to unknown nodes (`422`). **Submit** shows the result in a styled card.
 
 ### 7. Observability — "Explain this run" (`POST /pipelines/explain`)
-After a successful run, an on-demand **✨ Explain this run** button turns the black box into a glass box. It feeds the graph **plus the actual execution log** — the memory-bus `context` the run already returned — to `gpt-4o-mini` (structured output) and gets back a plain-English **summary** + an execution-ordered, per-node **play-by-play** (*"Scraped the page… used a language model to summarize… produced the final output"*).
+After a successful run, an on-demand **✨ Explain this run** button turns the black box into a glass box. It feeds the graph **plus the actual execution log** — the memory-bus `context` the run already returned — to an LLM (structured output) and gets back a plain-English **summary** + an execution-ordered, per-node **play-by-play** (*"Scraped the page… used a language model to summarize… produced the final output"*).
 
+* **Provider-agnostic** — the explainer auto-picks whichever key is in the vault by a deterministic priority (OpenAI → Anthropic → Google) and narrates via that provider's default model through the shared `STRUCTURED` layer that Extract uses. A user on *any single* provider gets a working explanation — no OpenAI required.
 * **Grounded, not generic** — it narrates the *real* outputs each node produced this run, not a hypothetical description of the diagram. This mirrors VectorShift's enterprise pitch: every result traceable back to the step that produced it.
 * **No truncation engineering needed** — the Scrape node's 8 KB cap keeps the whole context naturally bounded, so the raw log fits the model's window by design.
 * **On-demand** keeps the core Run loop fast and avoids a second model call on every execution.
@@ -136,9 +137,9 @@ After a successful run, an on-demand **✨ Explain this run** button turns the b
 
 ## 🧪 Testing
 
-**31 backend + 48 frontend**, run on every push via GitHub Actions.
+**33 backend + 48 frontend**, run on every push via GitHub Actions.
 
-* **Backend (pytest):** DAG algorithm (cycles, diamonds, isolated nodes), referential integrity, the execution engine (interpolation, scrape HTML-stripping, Extract JSON-schema build, Gemini schema translation), multi-provider routing (mocked adapters), friendly auth-error / malformed-key / missing-key guards, and the explain endpoint.
+* **Backend (pytest):** DAG algorithm (cycles, diamonds, isolated nodes), referential integrity, the execution engine (interpolation, scrape HTML-stripping, Extract JSON-schema build, Gemini schema translation), multi-provider routing (mocked adapters), friendly auth-error / malformed-key / missing-key guards, and the provider-agnostic explain endpoint (provider selection + narration).
 * **Frontend (jest):** variable parsing, store mechanics (immutable updates, edge pruning, import counter, copy/paste rewiring), type-compatibility rules, Extract dynamic handles, export sanitization, the submit flow.
 
 ```bash
