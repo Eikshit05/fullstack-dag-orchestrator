@@ -23,6 +23,7 @@ const resolve = (value, data) =>
 export function BaseNode({ id, data, config }) {
   const updateNodeInternals = useUpdateNodeInternals();
   const updateNodeField = useStore((s) => s.updateNodeField);
+  const removeNode = useStore((s) => s.removeNode);
 
   const fields = useMemo(() => resolve(config.fields, data), [config, data]);
   const handles = useMemo(() => resolve(config.handles, data), [config, data]);
@@ -46,6 +47,19 @@ export function BaseNode({ id, data, config }) {
 
   return (
     <div className={`vs-node ${accent}`}>
+      {/* `nodrag` stops ReactFlow from starting a drag on pointerdown so the
+          click actually deletes instead of moving the node. */}
+      <button
+        type="button"
+        className="vs-node__delete nodrag"
+        title="Delete node"
+        onClick={(e) => {
+          e.stopPropagation();
+          removeNode(id);
+        }}
+      >
+        ✕
+      </button>
       <div className="vs-node__header">{config.title}</div>
       <div className="vs-node__body">
         {config.render
