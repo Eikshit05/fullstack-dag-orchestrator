@@ -124,6 +124,58 @@ After a successful run, an on-demand **✨ Explain this run** button turns the b
 
 ---
 
+## 🛠️ Build Your Own Pipeline — Import JSON schema
+
+The **Import JSON** button loads a pipeline from a file. A pipeline is one JSON object with two arrays — `nodes` and `edges`. A complete, runnable reference lives at [`examples/competitor-intelligence.json`](examples/competitor-intelligence.json) (scrapes a public Wikipedia page → analyzes → extracts typed fields).
+
+> **Easiest path:** build a small graph on the canvas, click **Export JSON**, and edit that file — it's emitted in exactly this shape.
+
+### Top level
+```json
+{ "nodes": [ /* ... */ ], "edges": [ /* ... */ ] }
+```
+
+### A node
+```json
+{
+  "id": "llm-1",                       // unique; use the `${type}-${n}` convention
+  "type": "llm",                       // see the table
+  "position": { "x": 780, "y": 220 },  // canvas coordinates
+  "data": { "id": "llm-1", "nodeType": "llm", "provider": "OpenAI", "model": "gpt-4o-mini" }
+}
+```
+
+### Node types, `data`, and handles
+| Node | `type` | `data` fields | input handles | output handles |
+|---|---|---|---|---|
+| Input | `customInput` | `inputName`, `inputType` (`Text`/`Number`/`Boolean`/`JSON`), `value` | — | `value` |
+| Text | `text` | `text` (use `{{var}}`) | `var-<name>` — one per `{{var}}` | `output` |
+| Scrape URL | `scrape` | `url` | `url` (optional override) | `content` |
+| LLM | `llm` | `provider` (`OpenAI`/`Anthropic`/`Google`), `model` | `system`, `prompt` | `response` |
+| Extract Data | `extract` | `provider`, `model`, `fields: [{ "name", "type" }]` — type ∈ `Text`/`Decimal`/`Boolean`/`List` | `context` | `field-<name>` — one per field |
+| Output | `customOutput` | `outputName`, `outputType` | `value` | — |
+
+### An edge — **the part everyone gets wrong**
+```json
+{
+  "id": "e4",
+  "source": "llm-1",     "sourceHandle": "llm-1-response",
+  "target": "extract-1", "targetHandle": "extract-1-context"
+}
+```
+**A handle id is `"${nodeId}-${handleId}"`** — the node's id, a hyphen, then the handle from the table. So the LLM's `response` output on node `llm-1` → `"llm-1-response"`; the Extract's `context` input on node `extract-1` → `"extract-1-context"`. Two more:
+- Scrape → a Text variable: `"scrape-1-content"` → `"text-1-var-document"` (the Text node contains `{{document}}`)
+- Extract field → Output: `"extract-1-field-company_name"` → `"customOutput-1-value"`
+
+### Rules & gotchas
+- **Handle names are prefixed.** `value`, not `customInput-1-value`, will silently fail to connect. (This is the #1 mistake.)
+- **Text variables drive handles.** Each `{{name}}` in a Text node auto-creates a `var-name` input handle — wire into it or it stays empty.
+- **Type compatibility.** A connection is allowed if the types match, either side is `Any`, or the **target is `Text`** (everything widens to text). A `Text` source into a `Number`/`Boolean`/`JSON` input is rejected.
+- **Must be a DAG.** A cycle is rejected at run time.
+- **AI nodes need a key** set in **⚙️ Keys** — keys are *never* part of the JSON and are stripped from exports.
+
+---
+
 ## ⚙️ Tooling
 
 ### Styling Pipeline
