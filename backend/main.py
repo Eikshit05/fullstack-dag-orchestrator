@@ -198,11 +198,14 @@ def _provider_and_key(node, api_keys):
     return provider, key
 
 
+PROVIDER_LABELS = {"openai": "OpenAI", "anthropic": "Anthropic", "google": "Google"}
+
+
 def _require_ai(node, api_keys, action):
     """Shared guard for AI nodes: resolve provider + key, fail cleanly on an
     unknown provider, a missing key, or a malformed key."""
     provider, api_key = _provider_and_key(node, api_keys)
-    label = provider.title()
+    label = PROVIDER_LABELS.get(provider, provider.title())
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
     if not api_key:
@@ -220,6 +223,36 @@ def _require_ai(node, api_keys, action):
     return provider, api_key
 
 
+_AUTH_SIGNS = (
+    "invalid api key", "incorrect api key", "api key not valid",
+    "authentication", "unauthenticated", "permission denied", "401",
+)
+
+
+def _is_auth_error(exc):
+    """True when a provider rejected the key. Works across SDKs: OpenAI/Anthropic
+    errors expose .status_code; Google raises message-only errors, so we also
+    sniff the text."""
+    if getattr(exc, "status_code", None) in (401, 403):
+        return True
+    msg = str(exc).lower()
+    return any(sign in msg for sign in _AUTH_SIGNS)
+
+
+def _ai_http_error(provider, exc, kind="API"):
+    """Map an adapter exception to a clean HTTP error: missing SDK -> 500,
+    rejected key -> friendly 401, anything else -> 502."""
+    label = PROVIDER_LABELS.get(provider, provider.title())
+    if isinstance(exc, ImportError):
+        return HTTPException(status_code=500, detail=f"The {label} SDK isn't installed on the server ({exc}).")
+    if _is_auth_error(exc):
+        return HTTPException(
+            status_code=401,
+            detail=f"Your {label} API key was rejected — double-check it's a valid {label} key in Settings (⚙️).",
+        )
+    return HTTPException(status_code=502, detail=f"{label} {kind} error: {exc}")
+
+
 def _run_llm(node, prompt, system, api_keys=None):
     """Route an LLM node to its selected provider's chat adapter."""
     provider, api_key = _require_ai(node, api_keys, "run the LLM step")
@@ -228,10 +261,8 @@ def _run_llm(node, prompt, system, api_keys=None):
         return PROVIDERS[provider]["chat"](api_key, model, system, prompt)
     except HTTPException:
         raise
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail=f"The {provider.title()} SDK isn't installed on the server ({exc}).")
-    except Exception as exc:  # auth / rate-limit / network — surface cleanly
-        raise HTTPException(status_code=502, detail=f"{provider.title()} API error: {exc}")
+    except Exception as exc:  # missing SDK / rejected key / network — classified
+        raise _ai_http_error(provider, exc, "API")
 
 
 _SCHEMA_TYPE_MAP = {"Text": "string", "Decimal": "number", "Boolean": "boolean", "List": "array"}
@@ -395,10 +426,8 @@ def _run_extract(node, text, api_keys=None):
         parsed = PROVIDERS[provider]["extract"](api_key, model, text, schema)
     except HTTPException:
         raise
-    except ImportError as exc:
-        raise HTTPException(status_code=500, detail=f"The {provider.title()} SDK isn't installed on the server ({exc}).")
-    except Exception as exc:  # auth / rate-limit / parse — surface cleanly
-        raise HTTPException(status_code=502, detail=f"{provider.title()} extraction error: {exc}")
+    except Exception as exc:  # missing SDK / rejected key / parse — classified
+        raise _ai_http_error(provider, exc, "extraction")
     # Push each extracted value onto its corresponding output handle.
     out = {}
     for f in fields:
