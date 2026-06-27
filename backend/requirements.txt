@@ -4,3 +4,5 @@ pydantic>=2
 pytest
 httpx
 openai
+anthropic
+google-generativeai
