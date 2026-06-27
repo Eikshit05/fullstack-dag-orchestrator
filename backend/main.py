@@ -341,15 +341,20 @@ def _openai_chat(api_key, model, system, prompt):
     return resp.choices[0].message.content
 
 
-def _openai_extract(api_key, model, text, schema):
+def _openai_structured(api_key, model, system, user, schema, schema_name="result"):
+    """OpenAI structured output via native response_format json_schema."""
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
         model=model,
-        messages=[{"role": "system", "content": EXTRACT_SYS}, {"role": "user", "content": str(text)}],
-        response_format={"type": "json_schema", "json_schema": {"name": "extraction", "schema": schema, "strict": True}},
+        messages=[{"role": "system", "content": str(system)}, {"role": "user", "content": str(user)}],
+        response_format={"type": "json_schema", "json_schema": {"name": schema_name, "schema": schema, "strict": True}},
     )
     return json.loads(resp.choices[0].message.content)
+
+
+def _openai_extract(api_key, model, text, schema):
+    return _openai_structured(api_key, model, EXTRACT_SYS, text, schema, "extraction")
 
 
 def _anthropic_chat(api_key, model, system, prompt):
@@ -362,22 +367,29 @@ def _anthropic_chat(api_key, model, system, prompt):
     return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
 
 
-def _anthropic_extract(api_key, model, text, schema):
-    # Anthropic has no json_schema param — force a tool call whose input_schema
-    # is our schema, then read the tool input as the structured result.
+def _anthropic_structured(api_key, model, system, user, schema, schema_name="result"):
+    """Anthropic structured output: no json_schema param, so force a tool call
+    whose input_schema is our schema and read the tool input back."""
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.create(
-        model=model,
-        max_tokens=2048,
-        tools=[{"name": "extract", "description": "Return the requested fields.", "input_schema": schema}],
-        tool_choice={"type": "tool", "name": "extract"},
-        messages=[{"role": "user", "content": f"{EXTRACT_SYS}\n\nText:\n{text}"}],
-    )
+    kwargs = {
+        "model": model,
+        "max_tokens": 2048,
+        "tools": [{"name": schema_name, "description": "Return the structured result.", "input_schema": schema}],
+        "tool_choice": {"type": "tool", "name": schema_name},
+        "messages": [{"role": "user", "content": str(user)}],
+    }
+    if system:
+        kwargs["system"] = str(system)
+    resp = client.messages.create(**kwargs)
     for block in resp.content:
         if getattr(block, "type", None) == "tool_use":
             return block.input
     return {}
+
+
+def _anthropic_extract(api_key, model, text, schema):
+    return _anthropic_structured(api_key, model, EXTRACT_SYS, text, schema, "extract")
 
 
 def _google_chat(api_key, model, system, prompt):
@@ -387,21 +399,33 @@ def _google_chat(api_key, model, system, prompt):
     return gm.generate_content(str(prompt or "")).text
 
 
-def _google_extract(api_key, model, text, schema):
+def _google_structured(api_key, model, system, user, schema, schema_name="result"):
+    """Gemini structured output via response_schema (OpenAPI-subset)."""
     import google.generativeai as genai
     genai.configure(api_key=api_key)
-    gm = genai.GenerativeModel(model)
+    gm = genai.GenerativeModel(model, system_instruction=str(system) if system else None)
     resp = gm.generate_content(
-        f"{EXTRACT_SYS}\n\nText:\n{text}",
+        str(user),
         generation_config={"response_mime_type": "application/json", "response_schema": _to_gemini_schema(schema)},
     )
     return json.loads(resp.text)
+
+
+def _google_extract(api_key, model, text, schema):
+    return _google_structured(api_key, model, EXTRACT_SYS, text, schema, "extraction")
 
 
 PROVIDERS = {
     "openai": {"chat": _openai_chat, "extract": _openai_extract},
     "anthropic": {"chat": _anthropic_chat, "extract": _anthropic_extract},
     "google": {"chat": _google_chat, "extract": _google_extract},
+}
+
+# Shared structured-output layer, reused by Extract and the Explain agent.
+STRUCTURED = {
+    "openai": _openai_structured,
+    "anthropic": _anthropic_structured,
+    "google": _google_structured,
 }
 
 DEFAULT_MODELS = {
@@ -547,17 +571,20 @@ EXPLAIN_SCHEMA = {
 
 _EXPLAIN_CONFIG_KEYS = ("inputName", "value", "inputType", "url", "text", "provider", "model", "outputName", "fields")
 
+# The explainer auto-picks whichever key is in the vault, in this strict order.
+_EXPLAIN_PRIORITY = ("openai", "anthropic", "google")
 
-def _openai_json(api_key, model, system, user, schema, schema_name="result"):
-    """One OpenAI structured-output call returning parsed JSON. Lazy-imported."""
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key)
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        response_format={"type": "json_schema", "json_schema": {"name": schema_name, "schema": schema, "strict": True}},
+
+def resolve_explainer_provider(api_keys):
+    """First available provider key, by priority. The explainer is provider-agnostic
+    so a user on any one of the three can narrate a run."""
+    for provider in _EXPLAIN_PRIORITY:
+        if (api_keys or {}).get(provider):
+            return provider
+    raise HTTPException(
+        status_code=400,
+        detail="No API key found — add an OpenAI, Anthropic, or Google key in Settings (⚙️) to explain a run.",
     )
-    return json.loads(resp.choices[0].message.content)
 
 
 def _explain_payload(nodes, edges, context):
@@ -581,14 +608,14 @@ def _explain_payload(nodes, edges, context):
 
 @app.post("/pipelines/explain")
 def explain_pipeline(pipeline: ExplainPipeline):
-    api_key = (pipeline.apiKeys or {}).get("openai")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Add your OpenAI API key in Settings (⚙️) to explain a run.")
+    provider = resolve_explainer_provider(pipeline.apiKeys)
+    api_key = pipeline.apiKeys[provider]
+    label = PROVIDER_LABELS.get(provider, provider.title())
     if not api_key.isascii() or len(api_key) > 300:
-        raise HTTPException(status_code=400, detail="That OpenAI API key looks invalid — re-enter it in Settings (⚙️).")
+        raise HTTPException(status_code=400, detail=f"That {label} API key looks invalid — re-enter it in Settings (⚙️).")
     user = _explain_payload(pipeline.nodes, pipeline.edges, pipeline.context)
     try:
-        result = _openai_json(api_key, "gpt-4o-mini", EXPLAIN_SYS, user, EXPLAIN_SCHEMA, "run_explanation")
+        result = STRUCTURED[provider](api_key, DEFAULT_MODELS[provider], EXPLAIN_SYS, user, EXPLAIN_SCHEMA, "run_explanation")
     except Exception as exc:  # rejected key / network — classified like the run path
-        raise _ai_http_error("openai", exc, "explain")
+        raise _ai_http_error(provider, exc, "explain")
     return {"summary": result.get("summary", ""), "steps": result.get("steps", [])}
