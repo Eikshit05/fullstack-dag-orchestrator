@@ -4,6 +4,7 @@ import { PipelineUI } from './ui';
 import { SubmitButton } from './submit';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
+import { Toast } from './components/Toast';
 
 function App() {
   // One provider for the whole app so the command palette and the canvas share a
@@ -15,6 +16,7 @@ function App() {
       <SubmitButton />
       <CommandPalette />
       <KeyboardShortcuts />
+      <Toast />
     </ReactFlowProvider>
   );
 }

@@ -74,6 +74,26 @@ def test_llm_without_api_key_returns_400():
     assert "API key" in res.json()["detail"]
 
 
+def test_math_with_non_numeric_input_raises_400():
+    """The Jordan Belfort case: feeding text into Math fails loudly, not 'sum=2'."""
+    payload = {
+        "nodes": [
+            node("customInput-1", "customInput", value="who is jordan belfort?"),
+            node("customInput-2", "customInput", value="2"),
+            node("math-1", "math", operator="+"),
+            node("customOutput-1", "customOutput", outputName="sum"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "math-1", "a"),
+            edge("customInput-2", "value", "math-1", "b"),
+            edge("math-1", "result", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 400
+    assert "expected a number" in res.json()["detail"]
+
+
 def test_cycle_returns_400():
     payload = {
         "nodes": [

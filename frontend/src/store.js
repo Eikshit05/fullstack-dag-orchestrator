@@ -9,12 +9,15 @@ import {
     applyEdgeChanges,
     MarkerType,
   } from 'reactflow';
+import { checkConnection } from './lib/types';
 
 export const useStore = create((set, get) => ({
     nodes: [],
     edges: [],
     nodeIDs: {},
     clipboard: { nodes: [], edges: [] },
+    connectionNotice: null,
+    dismissNotice: () => set({ connectionNotice: null }),
     getNodeID: (type) => {
         const newIDs = {...get().nodeIDs};
         if (newIDs[type] === undefined) {
@@ -123,8 +126,18 @@ export const useStore = create((set, get) => ({
       });
     },
     onConnect: (connection) => {
+      // Hard block: reject edges whose data types are incompatible (e.g. a Text
+      // output into a Number-only Math input). A runtime guard still backstops Any.
+      const { ok, sourceType, targetType } = checkConnection(connection, get().nodes);
+      if (!ok) {
+        set({
+          connectionNotice: `Can't connect ${sourceType} → ${targetType}. A ${targetType} input only accepts ${targetType} or Any.`,
+        });
+        return;
+      }
       set({
         edges: addEdge({...connection, type: 'smoothstep', animated: true, markerEnd: {type: MarkerType.Arrow, height: '20px', width: '20px'}}, get().edges),
+        connectionNotice: null,
       });
     },
     updateNodeField: (nodeId, fieldName, fieldValue) => {

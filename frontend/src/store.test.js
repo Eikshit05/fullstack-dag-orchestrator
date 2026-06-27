@@ -7,8 +7,39 @@ describe('Zustand Store Mechanics', () => {
       nodes: [],
       edges: [],
       nodeIDs: {},
-      clipboard: { nodes: [], edges: [] }
+      clipboard: { nodes: [], edges: [] },
+      connectionNotice: null
     });
+  });
+
+  it('onConnect hard-blocks a Text output into a Math number input', () => {
+    useStore.setState({
+      nodes: [
+        { id: 'customInput-1', type: 'customInput', position: { x: 0, y: 0 }, data: { inputType: 'Text' } },
+        { id: 'math-1', type: 'math', position: { x: 0, y: 0 }, data: {} },
+      ],
+    });
+    useStore.getState().onConnect({
+      source: 'customInput-1', sourceHandle: 'customInput-1-value',
+      target: 'math-1', targetHandle: 'math-1-a',
+    });
+    expect(useStore.getState().edges).toHaveLength(0);
+    expect(useStore.getState().connectionNotice).toMatch(/Text → Number/);
+  });
+
+  it('onConnect allows a Number output into a Math number input', () => {
+    useStore.setState({
+      nodes: [
+        { id: 'customInput-1', type: 'customInput', position: { x: 0, y: 0 }, data: { inputType: 'Number' } },
+        { id: 'math-1', type: 'math', position: { x: 0, y: 0 }, data: {} },
+      ],
+    });
+    useStore.getState().onConnect({
+      source: 'customInput-1', sourceHandle: 'customInput-1-value',
+      target: 'math-1', targetHandle: 'math-1-a',
+    });
+    expect(useStore.getState().edges).toHaveLength(1);
+    expect(useStore.getState().connectionNotice).toBeNull();
   });
 
   it('adds nodes correctly', () => {

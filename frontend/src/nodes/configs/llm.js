@@ -7,8 +7,8 @@ export const llmConfig = {
     { name: 'apiKey', label: 'OpenAI API Key', kind: 'password', placeholder: 'sk-...', default: '' },
   ],
   handles: [
-    { id: 'system', type: 'target', position: 'left' },
-    { id: 'prompt', type: 'target', position: 'left' },
-    { id: 'response', type: 'source', position: 'right' },
+    { id: 'system', type: 'target', position: 'left', dataType: 'Text' },
+    { id: 'prompt', type: 'target', position: 'left', dataType: 'Text' },
+    { id: 'response', type: 'source', position: 'right', dataType: 'Text' },
   ],
 };
