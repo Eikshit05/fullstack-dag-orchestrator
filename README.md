@@ -64,7 +64,7 @@ Open **⚙️ Keys** in the toolbar, paste an **OpenAI** key (stored only in you
 ### 1. Config-Driven Node Abstraction
 Every node is declarative data (`src/nodes/configs/*.js`) rendered by a single `BaseNode`. Adding a node is a config file, not a component.
 
-* **Field registry** (`src/nodes/fields/`): fields map to a renderer by `kind` — `text`, `select`, `password`, **`schema`** (the Extract schema builder), **`providerModel`** (the compound provider→model selector). New input types = one registry entry.
+* **Field registry** (`src/nodes/fields/`): fields map to a renderer by `kind` — `text`, `select`, **`schema`** (the Extract schema builder), **`providerModel`** (the compound provider→model selector). New input types = one registry entry.
 * **Dynamic handles**: `handles` can be a function of node data — the Text node grows a handle per `{{variable}}`; the Extract node grows a typed handle per schema row.
 * **Escape hatch**: a config may supply `render()` for a fully custom body (the Text node delegates to `TextNodeBody` for auto-resize + variable parsing).
 
