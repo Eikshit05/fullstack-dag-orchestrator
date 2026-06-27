@@ -36,26 +36,6 @@ def test_input_text_output_interpolation():
     assert res.json()["outputs"]["greeting"] == "Hello world!"
 
 
-def test_math_two_plus_two_is_four():
-    """Two Inputs -> Math(+) -> Output computes 2 + 2 = 4 deterministically."""
-    payload = {
-        "nodes": [
-            node("customInput-1", "customInput", value="2"),
-            node("customInput-2", "customInput", value="2"),
-            node("math-1", "math", operator="+"),
-            node("customOutput-1", "customOutput", outputName="sum"),
-        ],
-        "edges": [
-            edge("customInput-1", "value", "math-1", "a"),
-            edge("customInput-2", "value", "math-1", "b"),
-            edge("math-1", "result", "customOutput-1", "value"),
-        ],
-    }
-    res = client.post("/pipelines/run", json=payload)
-    assert res.status_code == 200
-    assert res.json()["outputs"]["sum"] == "4"
-
-
 def test_llm_without_api_key_returns_400():
     """An LLM node with no key fails gracefully (not a 500)."""
     payload = {
@@ -74,35 +54,16 @@ def test_llm_without_api_key_returns_400():
     assert "API key" in res.json()["detail"]
 
 
-def test_math_with_non_numeric_input_raises_400():
-    """The Jordan Belfort case: feeding text into Math fails loudly, not 'sum=2'."""
-    payload = {
-        "nodes": [
-            node("customInput-1", "customInput", value="who is jordan belfort?"),
-            node("customInput-2", "customInput", value="2"),
-            node("math-1", "math", operator="+"),
-            node("customOutput-1", "customOutput", outputName="sum"),
-        ],
-        "edges": [
-            edge("customInput-1", "value", "math-1", "a"),
-            edge("customInput-2", "value", "math-1", "b"),
-            edge("math-1", "result", "customOutput-1", "value"),
-        ],
-    }
-    res = client.post("/pipelines/run", json=payload)
-    assert res.status_code == 400
-    assert "expected a number" in res.json()["detail"]
-
-
 def test_cycle_returns_400():
+    """A cyclic graph is rejected before execution (node type is irrelevant)."""
     payload = {
         "nodes": [
-            node("math-1", "math", operator="+"),
-            node("math-2", "math", operator="+"),
+            node("text-1", "text", text="{{a}}"),
+            node("text-2", "text", text="{{b}}"),
         ],
         "edges": [
-            edge("math-1", "result", "math-2", "a"),
-            edge("math-2", "result", "math-1", "a"),
+            edge("text-1", "output", "text-2", "var-b"),
+            edge("text-2", "output", "text-1", "var-a"),
         ],
     }
     res = client.post("/pipelines/run", json=payload)

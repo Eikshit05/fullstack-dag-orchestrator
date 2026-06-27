@@ -139,36 +139,6 @@ def _input_by_suffix(ins, suffix, context):
     return None
 
 
-def _require_number(value, node_id, handle):
-    """Parse a Math input as a number, or fail loudly. An unconnected input
-    (value is None) defaults to 0; a connected non-numeric value (e.g. the text
-    "who is jordan belfort?") raises instead of silently coercing to 0."""
-    if value is None:
-        return 0.0
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Math node '{node_id}' expected a number for input '{handle}', but got {value!r}.",
-        )
-
-
-def _apply_op(a, b, op):
-    if op == "+":
-        r = a + b
-    elif op == "-":
-        r = a - b
-    elif op in ("×", "*"):
-        r = a * b
-    elif op in ("÷", "/"):
-        r = a / b if b != 0 else 0.0
-    else:
-        r = 0.0
-    # Render whole numbers without a trailing .0 (so 2 + 2 reads as "4").
-    return str(int(r)) if r == int(r) else str(r)
-
-
 def _run_llm(node, prompt, system):
     """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
     (and the test suite) runs without `openai` installed or any key configured."""
@@ -230,11 +200,6 @@ def run_pipeline(pipeline: RunPipeline):
                     var = suffix[len("var-"):]
                     text = text.replace("{{" + var + "}}", str(context.get(source, "")))
             context[nid] = text
-
-        elif node.type == "math":
-            a = _require_number(_input_by_suffix(ins, "a", context), nid, "a")
-            b = _require_number(_input_by_suffix(ins, "b", context), nid, "b")
-            context[nid] = _apply_op(a, b, data.get("operator", "+"))
 
         elif node.type == "llm":
             prompt = _input_by_suffix(ins, "prompt", context)
