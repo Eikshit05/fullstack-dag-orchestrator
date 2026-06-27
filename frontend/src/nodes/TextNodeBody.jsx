@@ -18,6 +18,14 @@ export function TextNodeBody({ id, data }) {
   const rafRef = useRef(null);
   const debounceRef = useRef(null);
 
+  // Re-sync the editor when data.text changes from OUTSIDE (import/load). The
+  // component is reused across imports (same node id), so useState's initializer
+  // won't re-run; without this the textarea would show stale text. Our own typing
+  // commits the same value to the store, so this is a no-op during editing.
+  useEffect(() => {
+    setText((current) => ((data.text ?? '') === current ? current : (data.text ?? '')));
+  }, [data.text]);
+
   // Hidden-mirror measurement, coalesced to one update per animation frame.
   useEffect(() => {
     const el = mirrorRef.current;
