@@ -141,19 +141,9 @@ def test_non_auth_error_still_returns_502(monkeypatch):
     assert "API error" in res.json()["detail"]
 
 
-def test_explain_summarizes_run(monkeypatch):
-    """The explain endpoint feeds the graph + context to the model and returns
-    its structured {summary, steps}."""
-    captured = {}
-
-    def fake_json(api_key, model, system, user, schema, schema_name="result"):
-        captured["user"] = user
-        return {"summary": "Scraped a doc and extracted fields.",
-                "steps": [{"node_id": "scrape-1", "action": "Fetched the document."}]}
-
-    monkeypatch.setattr(main, "_openai_json", fake_json)
-    payload = {
-        "apiKeys": {"openai": "sk-ok"},
+def _explain_doc_pipeline(api_keys):
+    return {
+        "apiKeys": api_keys,
         "nodes": [
             node("scrape-1", "scrape", url="https://example.com"),
             node("customOutput-1", "customOutput", outputName="page"),
@@ -161,18 +151,51 @@ def test_explain_summarizes_run(monkeypatch):
         "edges": [edge("scrape-1", "content", "customOutput-1", "value")],
         "context": {"scrape-1": "Example Domain ...", "customOutput-1": "Example Domain ..."},
     }
-    res = client.post("/pipelines/explain", json=payload)
+
+
+def test_explain_summarizes_run(monkeypatch):
+    """The explain endpoint feeds the execution log to the model and returns its
+    structured {summary, steps}."""
+    captured = {}
+
+    def fake(api_key, model, system, user, schema, schema_name="result"):
+        captured["user"] = user
+        return {"summary": "Scraped a doc and extracted fields.",
+                "steps": [{"node_id": "scrape-1", "action": "Fetched the document."}]}
+
+    monkeypatch.setitem(main.STRUCTURED, "openai", fake)
+    res = client.post("/pipelines/explain", json=_explain_doc_pipeline({"openai": "sk-ok"}))
     assert res.status_code == 200
     body = res.json()
     assert body["summary"].startswith("Scraped")
     assert body["steps"][0]["node_id"] == "scrape-1"
-    # the execution log actually reached the model
     assert "scrape-1" in captured["user"] and "Example Domain" in captured["user"]
 
 
-def test_explain_without_key_returns_400():
-    payload = {"nodes": [], "edges": [], "context": {}}
-    res = client.post("/pipelines/explain", json=payload)
+def test_explain_uses_available_provider_when_no_openai(monkeypatch):
+    """With only an Anthropic key, the explainer routes to Anthropic (not 'add OpenAI')."""
+    captured = {}
+
+    def fake(api_key, model, system, user, schema, schema_name="result"):
+        captured["model"] = model
+        return {"summary": "via claude", "steps": []}
+
+    monkeypatch.setitem(main.STRUCTURED, "anthropic", fake)
+    res = client.post("/pipelines/explain", json=_explain_doc_pipeline({"anthropic": "sk-ant-ok"}))
+    assert res.status_code == 200
+    assert res.json()["summary"] == "via claude"
+    assert captured["model"] == main.DEFAULT_MODELS["anthropic"]
+
+
+def test_explain_prefers_openai_when_multiple_keys(monkeypatch):
+    monkeypatch.setitem(main.STRUCTURED, "openai", lambda *a, **k: {"summary": "openai", "steps": []})
+    monkeypatch.setitem(main.STRUCTURED, "anthropic", lambda *a, **k: {"summary": "anthropic", "steps": []})
+    res = client.post("/pipelines/explain", json=_explain_doc_pipeline({"openai": "sk-ok", "anthropic": "sk-ant-ok"}))
+    assert res.json()["summary"] == "openai"
+
+
+def test_explain_without_any_key_returns_400():
+    res = client.post("/pipelines/explain", json={"nodes": [], "edges": [], "context": {}})
     assert res.status_code == 400
     assert "API key" in res.json()["detail"]
 
