@@ -71,6 +71,36 @@ describe('Zustand Store Mechanics', () => {
     expect(useStore.getState().edges[0].id).toBe('edge-ab');
   });
 
+  it('importPipeline replaces canvas and rebuilds the id counter from imported ids', () => {
+    const store = useStore.getState();
+    store.importPipeline({
+      nodes: [
+        { id: 'customInput-3', type: 'customInput', data: {} },
+        { id: 'customInput-1', type: 'customInput', data: {} },
+        { id: 'llm-2', type: 'llm', data: {} },
+      ],
+      edges: [{ id: 'e1', source: 'customInput-3', target: 'llm-2' }],
+    });
+
+    expect(useStore.getState().nodes).toHaveLength(3);
+    expect(useStore.getState().edges).toHaveLength(1);
+
+    // Counter seeds to the MAX suffix per type, so the next id can't collide.
+    expect(useStore.getState().getNodeID('customInput')).toBe('customInput-4');
+    expect(useStore.getState().getNodeID('llm')).toBe('llm-3');
+  });
+
+  it('importPipeline ignores ids that do not match the type-n convention', () => {
+    const store = useStore.getState();
+    store.importPipeline({
+      nodes: [{ id: 'weird_uuid_abc', type: 'customInput', data: {} }],
+      edges: [],
+    });
+
+    // No numeric suffix found -> counter starts fresh at 1.
+    expect(useStore.getState().getNodeID('customInput')).toBe('customInput-1');
+  });
+
   it('prunes only edges whose variable handle was removed (syncNodeHandles)', () => {
     const store = useStore.getState();
     store.addNode({ id: 'text-1', type: 'text', data: {} });
