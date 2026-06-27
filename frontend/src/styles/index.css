@@ -38,6 +38,20 @@
     @apply px-6 py-2 rounded-lg bg-accent-ai text-white font-semibold shadow
            hover:brightness-110 active:scale-[0.98] transition;
   }
+  .vs-cmdk__overlay { @apply fixed inset-0 bg-black/30 z-40; }
+  .vs-cmdk__content {
+    @apply fixed left-1/2 top-[18%] z-50 w-[440px] max-w-[90vw] -translate-x-1/2;
+  }
+  .vs-cmdk { @apply bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden; }
+  .vs-cmdk__input {
+    @apply w-full px-4 py-3 text-sm outline-none border-b border-slate-100 placeholder:text-slate-400;
+  }
+  .vs-cmdk__list { @apply max-h-72 overflow-y-auto p-2; }
+  .vs-cmdk__empty { @apply px-3 py-6 text-center text-sm text-slate-400; }
+  .vs-cmdk__item {
+    @apply px-3 py-2 rounded-md text-sm text-slate-700 cursor-pointer
+           aria-selected:bg-accent-io aria-selected:text-white;
+  }
 }
 
 body {
