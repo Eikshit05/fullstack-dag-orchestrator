@@ -1,8 +1,18 @@
 from fastapi.testclient import TestClient
 
-from main import app, _strip_html, build_extract_schema
+from types import SimpleNamespace
+
+from main import app, _strip_html, build_extract_schema, _node_api_key
 
 client = TestClient(app)
+
+
+def test_node_api_key_prefers_node_then_shared():
+    node_with_key = SimpleNamespace(data={"apiKey": "sk-node"})
+    node_without = SimpleNamespace(data={})
+    assert _node_api_key(node_with_key, "sk-shared") == "sk-node"   # per-node override
+    assert _node_api_key(node_without, "sk-shared") == "sk-shared"  # falls back to shared
+    assert _node_api_key(node_without, None) is None                # neither -> none
 
 
 def test_build_extract_schema_maps_types():

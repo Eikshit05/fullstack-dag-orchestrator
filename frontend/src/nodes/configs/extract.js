@@ -14,7 +14,6 @@ export const extractConfig = {
   category: 'ai',
   fields: [
     { name: 'model', label: 'Model', kind: 'select', options: ['gpt-4o-mini', 'gpt-4o'], default: 'gpt-4o-mini' },
-    { name: 'apiKey', label: 'OpenAI API Key', kind: 'password', placeholder: 'sk-...', default: '' },
     { name: 'fields', label: 'Schema', kind: 'schema', default: [] },
   ],
   // One target for the source text + one typed source handle per schema field.

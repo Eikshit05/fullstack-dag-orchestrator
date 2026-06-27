@@ -2,6 +2,7 @@
 
 import { DraggableNode } from './draggableNode';
 import { PipelineIO } from './components/PipelineIO';
+import { ApiKeyInput } from './components/ApiKeyInput';
 import { NODE_CONFIGS } from './nodes/configs';
 
 export const PipelineToolbar = () => (
@@ -12,7 +13,10 @@ export const PipelineToolbar = () => (
           <DraggableNode key={cfg.type} type={cfg.type} label={cfg.title} category={cfg.category} />
         ))}
       </div>
-      <PipelineIO />
+      <div className="vs-toolbar__right">
+        <ApiKeyInput />
+        <PipelineIO />
+      </div>
     </div>
   </div>
 );
