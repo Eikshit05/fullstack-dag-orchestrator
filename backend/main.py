@@ -103,6 +103,7 @@ class RunEdgeModel(BaseModel):
 class RunPipeline(BaseModel):
     nodes: list[RunNodeModel]
     edges: list[RunEdgeModel]
+    apiKey: str | None = None  # single key shared by all AI nodes (BYOK)
 
 
 def topological_order(nodes, edges):
@@ -189,16 +190,21 @@ def _scrape_url(url):
     return body[:8000]  # cap payload so a huge page can't flood the graph
 
 
-def _run_llm(node, prompt, system):
+def _node_api_key(node, default_key):
+    """The key an AI node should use: its own (rare override) else the shared key."""
+    return (node.data or {}).get("apiKey") or default_key
+
+
+def _run_llm(node, prompt, system, default_key=None):
     """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
     (and the test suite) runs without `openai` installed or any key configured."""
     data = node.data or {}
-    api_key = data.get("apiKey")
+    api_key = _node_api_key(node, default_key)
     model = data.get("model") or "gpt-4o-mini"
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail=f"Execution paused: add an OpenAI API key to node '{node.id}' to run the LLM step.",
+            detail="Execution paused: add your OpenAI API key in the toolbar to run the LLM step.",
         )
     try:
         from openai import OpenAI
@@ -246,20 +252,20 @@ def build_extract_schema(fields):
     }
 
 
-def _run_extract(node, text):
+def _run_extract(node, text, default_key=None):
     """Extract Data executor: build a JSON Schema from the node's fields, call the
     LLM in structured-output mode, and return a {field-<name>: value} dict so each
     value lands on its own typed output handle. BYOK, lazy OpenAI import."""
     data = node.data or {}
     fields = data.get("fields") or []
-    api_key = data.get("apiKey")
+    api_key = _node_api_key(node, default_key)
     model = data.get("model") or "gpt-4o-mini"
     if not fields:
         raise HTTPException(status_code=400, detail=f"Extract node '{node.id}' has no schema fields defined.")
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail=f"Execution paused: add an OpenAI API key to node '{node.id}' to run extraction.",
+            detail="Execution paused: add your OpenAI API key in the toolbar to run extraction.",
         )
     try:
         from openai import OpenAI
@@ -334,11 +340,11 @@ def run_pipeline(pipeline: RunPipeline):
         elif node.type == "llm":
             prompt = _input_by_suffix(ins, "prompt", context)
             system = _input_by_suffix(ins, "system", context)
-            context[nid] = _run_llm(node, prompt, system)
+            context[nid] = _run_llm(node, prompt, system, pipeline.apiKey)
 
         elif node.type == "extract":
             text = _input_by_suffix(ins, "context", context) or ""
-            context[nid] = _run_extract(node, text)  # {f"field-{name}": value}
+            context[nid] = _run_extract(node, text, pipeline.apiKey)  # {f"field-{name}": value}
 
         elif node.type == "customOutput":
             value = _input_by_suffix(ins, "value", context)
