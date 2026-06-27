@@ -7,7 +7,7 @@ export const filterConfig = {
     { name: 'mode', label: 'Mode', kind: 'select', options: ['Include', 'Exclude'], default: 'Include' },
   ],
   handles: [
-    { id: 'in', type: 'target', position: 'left' },
-    { id: 'out', type: 'source', position: 'right' },
+    { id: 'in', type: 'target', position: 'left', dataType: 'JSON' },
+    { id: 'out', type: 'source', position: 'right', dataType: 'JSON' },
   ],
 };

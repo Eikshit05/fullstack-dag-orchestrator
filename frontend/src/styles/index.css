@@ -48,6 +48,10 @@
            hover:brightness-110 active:scale-[0.98] transition
            disabled:opacity-60 disabled:cursor-not-allowed;
   }
+  .vs-toast {
+    @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] max-w-md cursor-pointer
+           px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-lg;
+  }
   .vs-cmdk__overlay { @apply fixed inset-0 bg-black/30 z-40; }
   .vs-cmdk__content {
     @apply fixed left-1/2 top-[18%] z-50 w-[440px] max-w-[90vw] -translate-x-1/2;

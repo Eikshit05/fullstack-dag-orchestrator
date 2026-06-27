@@ -6,5 +6,5 @@ export const outputConfig = {
     { name: 'outputName', label: 'Name', kind: 'text', default: (id) => id.replace('customOutput-', 'output_') },
     { name: 'outputType', label: 'Type', kind: 'select', options: ['Text'], default: 'Text' },
   ],
-  handles: [{ id: 'value', type: 'target', position: 'left' }],
+  handles: [{ id: 'value', type: 'target', position: 'left', dataType: 'Any' }],
 };

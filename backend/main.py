@@ -139,11 +139,19 @@ def _input_by_suffix(ins, suffix, context):
     return None
 
 
-def _to_number(value):
+def _require_number(value, node_id, handle):
+    """Parse a Math input as a number, or fail loudly. An unconnected input
+    (value is None) defaults to 0; a connected non-numeric value (e.g. the text
+    "who is jordan belfort?") raises instead of silently coercing to 0."""
+    if value is None:
+        return 0.0
     try:
         return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        raise HTTPException(
+            status_code=400,
+            detail=f"Math node '{node_id}' expected a number for input '{handle}', but got {value!r}.",
+        )
 
 
 def _apply_op(a, b, op):
@@ -224,8 +232,8 @@ def run_pipeline(pipeline: RunPipeline):
             context[nid] = text
 
         elif node.type == "math":
-            a = _to_number(_input_by_suffix(ins, "a", context))
-            b = _to_number(_input_by_suffix(ins, "b", context))
+            a = _require_number(_input_by_suffix(ins, "a", context), nid, "a")
+            b = _require_number(_input_by_suffix(ins, "b", context), nid, "b")
             context[nid] = _apply_op(a, b, data.get("operator", "+"))
 
         elif node.type == "llm":

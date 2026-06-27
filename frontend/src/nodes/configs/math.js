@@ -6,8 +6,8 @@ export const mathConfig = {
     { name: 'operator', label: 'Operator', kind: 'select', options: ['+', '-', '×', '÷'], default: '+' },
   ],
   handles: [
-    { id: 'a', type: 'target', position: 'left' },
-    { id: 'b', type: 'target', position: 'left' },
-    { id: 'result', type: 'source', position: 'right' },
+    { id: 'a', type: 'target', position: 'left', dataType: 'Number' },
+    { id: 'b', type: 'target', position: 'left', dataType: 'Number' },
+    { id: 'result', type: 'source', position: 'right', dataType: 'Number' },
   ],
 };
