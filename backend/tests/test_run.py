@@ -1,18 +1,27 @@
 from fastapi.testclient import TestClient
 
-from types import SimpleNamespace
-
-from main import app, _strip_html, build_extract_schema, _node_api_key
+from main import app, _strip_html, build_extract_schema
 
 client = TestClient(app)
 
 
-def test_node_api_key_prefers_node_then_shared():
-    node_with_key = SimpleNamespace(data={"apiKey": "sk-node"})
-    node_without = SimpleNamespace(data={})
-    assert _node_api_key(node_with_key, "sk-shared") == "sk-node"   # per-node override
-    assert _node_api_key(node_without, "sk-shared") == "sk-shared"  # falls back to shared
-    assert _node_api_key(node_without, None) is None                # neither -> none
+def test_anthropic_provider_not_wired_returns_501():
+    """Selecting a not-yet-wired provider fails cleanly (501), even with a key."""
+    payload = {
+        "apiKeys": {"anthropic": "sk-ant-x"},
+        "nodes": [
+            node("customInput-1", "customInput", value="hi"),
+            node("llm-1", "llm", provider="Anthropic", model="claude-sonnet-4-6"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "llm-1", "prompt"),
+            edge("llm-1", "response", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 501
+    assert "Anthropic" in res.json()["detail"]
 
 
 def test_build_extract_schema_maps_types():

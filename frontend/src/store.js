@@ -11,11 +11,11 @@ import {
   } from 'reactflow';
 import { checkConnection } from './lib/types';
 
-// A single OpenAI key shared by every AI node, persisted locally (never written
-// into the pipeline nodes, so it can't leak through Export).
-const API_KEY_STORAGE = 'vs-openai-api-key';
-const loadApiKey = () => {
-  try { return localStorage.getItem(API_KEY_STORAGE) || ''; } catch { return ''; }
+// One API key per provider (openai/anthropic/google), persisted locally and held
+// in the store — never written into a pipeline node, so keys can't leak via Export.
+const API_KEYS_STORAGE = 'vs-api-keys';
+const loadApiKeys = () => {
+  try { return JSON.parse(localStorage.getItem(API_KEYS_STORAGE)) || {}; } catch { return {}; }
 };
 
 export const useStore = create((set, get) => ({
@@ -25,10 +25,11 @@ export const useStore = create((set, get) => ({
     clipboard: { nodes: [], edges: [] },
     connectionNotice: null,
     dismissNotice: () => set({ connectionNotice: null }),
-    apiKey: loadApiKey(),
-    setApiKey: (key) => {
-      try { localStorage.setItem(API_KEY_STORAGE, key); } catch { /* storage unavailable */ }
-      set({ apiKey: key });
+    apiKeys: loadApiKeys(),
+    setApiKey: (provider, key) => {
+      const next = { ...get().apiKeys, [provider]: key };
+      try { localStorage.setItem(API_KEYS_STORAGE, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      set({ apiKeys: next });
     },
     getNodeID: (type) => {
         const newIDs = {...get().nodeIDs};

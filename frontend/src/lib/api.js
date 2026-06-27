@@ -15,14 +15,15 @@ export async function parsePipeline(nodes, edges) {
   return res.json();
 }
 
-export async function runPipeline(nodes, edges, apiKey) {
+export async function runPipeline(nodes, edges, apiKeys) {
   const res = await fetch(`${BASE_URL}/pipelines/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Execution needs each node's type/data and the edge handles, plus the single
-    // shared apiKey (sent top-level, not stored in any node) for the AI nodes.
+    // Execution needs each node's type/data and the edge handles, plus the keys by
+    // provider (sent top-level, never stored in a node). The backend routes each AI
+    // node to its selected provider/model using the matching key.
     body: JSON.stringify({
-      apiKey,
+      apiKeys,
       nodes: nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
       edges: edges.map((e) => ({
         source: e.source,
