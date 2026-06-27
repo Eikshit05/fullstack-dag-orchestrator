@@ -46,15 +46,20 @@ Open **⚙️ Keys** in the toolbar, paste an **OpenAI** key (stored only in you
 
 ---
 
-## 🧩 The Nodes (6)
+## 🧩 The Nodes (9)
+
+Four are starter nodes the brief provides (`Input`, `Output`, `LLM`, `Text`); the other **five are new** — two high-complexity AI nodes (`Scrape URL`, `Extract Data`) and three utilities (`Text Formatter`, `Split Text`, `Note`).
 
 | Node | Role | Notes |
 | --- | --- | --- |
 | **Input** | Inject a typed value (`Text` / `Number` / `Boolean` / `JSON`) | The chosen type flows onto its output handle |
 | **Text** | Prompt template with `{{variable}}` interpolation | Each `{{var}}` spawns a left input handle dynamically |
-| **Scrape URL** | Fetch a page → readable text | `httpx`, 10s timeout, zero-dep HTML→text, 8k cap |
+| **Text Formatter** *(new)* | `Text → Upper/Lower/Title → Text` | A linear, deterministic executor — no branching |
+| **Split Text** *(new)* | `Text → List` on a delimiter | Output handle is typed `JSON`; trims tokens |
 | **LLM** | Generative step | Per-node **Provider → Model** selection |
-| **Extract Data** | Force unstructured text into a typed schema | Schema builder → one **typed output handle per field** via LLM structured output |
+| **Scrape URL** *(new)* | Fetch a page → readable text | `httpx`, 10s timeout, zero-dep HTML→text, 8k cap |
+| **Extract Data** *(new)* | Force unstructured text into a typed schema | Schema builder → one **typed output handle per field** via LLM structured output |
+| **Note** *(new)* | Free-form documentation block on the canvas | The `render()` **escape hatch** — custom body, no handles |
 | **Output** | Terminal sink, captures a value | — |
 
 ---
@@ -150,9 +155,12 @@ The **Import JSON** button loads a pipeline from a file. A pipeline is one JSON 
 |---|---|---|---|---|
 | Input | `customInput` | `inputName`, `inputType` (`Text`/`Number`/`Boolean`/`JSON`), `value` | — | `value` |
 | Text | `text` | `text` (use `{{var}}`) | `var-<name>` — one per `{{var}}` | `output` |
-| Scrape URL | `scrape` | `url` | `url` (optional override) | `content` |
+| Text Formatter | `textFormatter` | `action` (`Uppercase`/`Lowercase`/`Title Case`) | `input` | `output` |
+| Split Text | `splitText` | `delimiter` | `input` | `list` |
 | LLM | `llm` | `provider` (`OpenAI`/`Anthropic`/`Google`), `model` | `system`, `prompt` | `response` |
+| Scrape URL | `scrape` | `url` | `url` (optional override) | `content` |
 | Extract Data | `extract` | `provider`, `model`, `fields: [{ "name", "type" }]` — type ∈ `Text`/`Decimal`/`Boolean`/`List` | `context` | `field-<name>` — one per field |
+| Note | `note` | `note` (free text) | — | — |
 | Output | `customOutput` | `outputName`, `outputType` | `value` | — |
 
 ### An edge — **the part everyone gets wrong**
