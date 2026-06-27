@@ -1,134 +1,149 @@
-# Fullstack DAG Orchestrator (Pipeline Builder)
+# Fullstack DAG Orchestrator — Visual AI Pipeline Engine
 
 [![CI](https://github.com/Eikshit05/fullstack-dag-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/Eikshit05/fullstack-dag-orchestrator/actions/workflows/ci.yml)
 
-A node-based pipeline editor built with a **React + ReactFlow** frontend and a **FastAPI** backend. This repository was engineered to fulfill the VectorShift frontend technical assessment, prioritizing scalable node abstractions, deterministic state management, and robust graph validation.
+A node-based, **executable** AI pipeline builder — **React + ReactFlow** on the front, **FastAPI** on the back. You wire up a graph on a canvas and actually **run** it: ingest live data, reason with an LLM, force the result into a typed schema, and deliver structured output.
+
+It began as the VectorShift frontend technical assessment (config-driven node abstraction, styling, the text node's `{{variable}}` handles, and a `/pipelines/parse` DAG check) and was then evolved into a **specialized AI orchestration engine** with a live execution backend and per-node multi-provider routing.
 
 **Author:** Eikshit Singhal
+
+> **The flagship flow** — an "Investment Committee analyst" pipeline:
+> ```
+> Scrape URL ─┐
+>             ├─► Text (prompt) ─► LLM ─► Extract Data ─┬─► company
+> Input ──────┘                                          ├─► segments (List)
+>                                                         └─► risks   (List)
+> ```
+> Ingest → reason → structure → deliver, end-to-end, with live OpenAI calls.
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
+**Prerequisites:** Node.js 18+, Python 3.10+
 
-* **Node.js**: v18+
-* **Python**: 3.10+
-
-### 1. Start the Backend
-
+### 1. Backend
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # includes openai + httpx for execution
 uvicorn main:app --reload
 ```
+API at `http://localhost:8000`.
 
-*The API will be available at `http://localhost:8000`.*
-
-### 2. Start the Frontend (New Terminal)
-
+### 2. Frontend (new terminal)
 ```bash
 cd frontend
 npm install
 npm start
 ```
+App at `http://localhost:3000`. (`npm start` runs a `prestart` hook that compiles Tailwind via its CLI — see *Styling Pipeline*.)
 
-*The application will open at `http://localhost:3000`.*
+### 3. Run a live pipeline
+Open **⚙️ Keys** in the toolbar, paste an **OpenAI** key (stored only in your browser), wire `Scrape/Input → Text → LLM → Extract → Output`, and hit **Run Pipeline**.
 
-*(Note: `npm start` automatically triggers a `prestart` hook to compile the Tailwind CSS via CLI before launching the React development server. See "Styling Pipeline" below for architectural details.)*
+---
+
+## 🧩 The Nodes (6)
+
+| Node | Role | Notes |
+| --- | --- | --- |
+| **Input** | Inject a typed value (`Text` / `Number` / `Boolean` / `JSON`) | The chosen type flows onto its output handle |
+| **Text** | Prompt template with `{{variable}}` interpolation | Each `{{var}}` spawns a left input handle dynamically |
+| **Scrape URL** | Fetch a page → readable text | `httpx`, 10s timeout, zero-dep HTML→text, 8k cap |
+| **LLM** | Generative step | Per-node **Provider → Model** selection |
+| **Extract Data** | Force unstructured text into a typed schema | Schema builder → one **typed output handle per field** via LLM structured output |
+| **Output** | Terminal sink, captures a value | — |
 
 ---
 
 ## 🏗️ Architecture & Technical Decisions
 
-### Part 1: Config-Driven Node Abstraction
+### 1. Config-Driven Node Abstraction
+Every node is declarative data (`src/nodes/configs/*.js`) rendered by a single `BaseNode`. Adding a node is a config file, not a component.
 
-Nodes are treated as declarative data rather than hardcoded React components. Every node is defined by a configuration file in `src/nodes/configs/` (e.g., `llm.js`), which is rendered by a singular `BaseNode.jsx`.
+* **Field registry** (`src/nodes/fields/`): fields map to a renderer by `kind` — `text`, `select`, `password`, **`schema`** (the Extract schema builder), **`providerModel`** (the compound provider→model selector). New input types = one registry entry.
+* **Dynamic handles**: `handles` can be a function of node data — the Text node grows a handle per `{{variable}}`; the Extract node grows a typed handle per schema row.
+* **Escape hatch**: a config may supply `render()` for a fully custom body (the Text node delegates to `TextNodeBody` for auto-resize + variable parsing).
 
-* **Field Registry:** Input fields map to a renderer registry (`src/nodes/fields/`) via a `kind` property (`text`, `select`, `checkbox`, etc.). Adding a new field type requires exactly one registry entry.
-* **Dynamic Handles:** Handles distribute evenly per side automatically. Both `fields` and `handles` can accept functions of node data for dynamic rendering, and a config may supply a `render()` escape hatch for fully custom bodies.
-* **Demonstration:** Five custom nodes (`filter`, `math`, `http`, `conditional`, `note`) are included to showcase the abstraction's flexibility; only `note` uses the `render()` escape hatch.
+### 2. A Real Type System
+Handles carry a `dataType` (`Text` / `Number` / `Boolean` / `JSON` / `Any`). Validity is enforced at **two layers**:
 
-### Part 2: Unified Design System
+* **Connection-time (hard block):** `onConnect` rejects incompatible wires — same type, or either side `Any`, or the target is `Text` (everything safely widens to text); a Text→Number wire is refused with a toast.
+* **Execution-time (runtime guard):** even when `Any` lets a value through, executors validate at the node and fail loudly rather than silently coercing.
 
-The UI utilizes a token-driven Tailwind design system configured in `tailwind.config.js`. Category accent colors, radii, and shadows are centralized. Modifying a category token updates all corresponding nodes and toolbar elements globally.
+### 3. The Execution Engine — `POST /pipelines/run`
+The backend turns the graph into a running computation:
 
-### Part 3: Text Node Mechanics
+* **Topological order** via Kahn's algorithm (reused from the DAG check); a cycle returns `400` before anything runs.
+* **A "memory bus"** maps each node to its output. Multi-output nodes (Extract Data) store a `{handle: value}` dict, so distinct typed values fan out to distinct downstream nodes.
+* **Per-node executors**: `customInput`, `text` (interpolation), `scrape` (live fetch), `llm`, `extract` (structured output), `customOutput`.
 
-The text node (`src/nodes/TextNodeBody.jsx`) is hardened against common canvas UI bugs:
+### 4. Multi-Provider, Node-Level Routing
+Each AI node picks its own brain — cheap model for triage, a heavier one for synthesis — all in one graph.
 
-* **Auto-Resize via Hidden Mirror:** Instead of brittle JavaScript text-width calculations, the node utilizes a hidden-mirror `<div>` combined with an rAF-throttled `ResizeObserver`. The browser's native layout engine computes the geometry, preventing layout thrashing during canvas zoom/pan.
-* **Variable Extraction:** `{{variable}}` handles are extracted via `src/lib/parseVariables.js`, which filters for valid, unique, non-reserved JavaScript identifiers.
-* **Debounced State:** Recomputation is debounced (~300ms) to prevent transient typos from destroying existing edges. `updateNodeInternals` is tightly controlled to keep edges visually anchored as the node resizes.
+* **Provider → Model on the node** (pipeline logic, exported with the graph): a `providerModel` compound field; the model list follows the provider and resets to a valid option on change.
+* **Keys are global, not per-node** (credentials): one key per provider in the **⚙️ Settings** vault, persisted to `localStorage`, injected into the run payload only at execution time — **never written into a node**, so they can't leak through Export.
+* **Status:** OpenAI is wired end-to-end (LLM + Extract). Anthropic/Google are selectable and return a clean `501 "routing isn't wired yet"` until the multi-SDK backend lands (see Roadmap).
 
-### Part 4: Backend Integration & Graph Validation
+### 5. Scrape URL & Extract Data
+* **Scrape:** `httpx.get` with timeout + redirects; JSON passes through, otherwise a regex stripper reduces HTML to text (no BeautifulSoup). DNS/timeout/HTTP errors → clean `502`.
+* **Extract:** builds a strict **JSON Schema** from the schema-builder rows and calls the model in structured-output mode (`response_format: json_schema`), then pushes each value to its `field-<name>` handle. Type map: `Decimal→number`, `List→array`, `Boolean→boolean`, `Text→string`.
 
-The backend exposes `POST /pipelines/parse`, accepting a JSON payload of nodes and edges.
-
-* **Referential Integrity:** A Pydantic validator intercepts edges referencing non-existent nodes, returning a clean `422 Unprocessable Entity` rather than throwing a `500 Internal Server Error`.
-* **Kahn’s Algorithm:** Directed Acyclic Graph (DAG) validation is computed linearly. The algorithm initializes the in-degree array for *all* nodes in the payload, ensuring disconnected subgraphs and isolated nodes do not falsely trigger cycle detections.
-* **Submit Feedback:** Pipeline submission triggers both a native `window.alert()` (satisfying strict assessment criteria) and a polished UI modal (`ResultCard`). The alert is deferred via `setTimeout(..., 0)` to prevent main-thread blocking before the React commit/paint cycle completes.
+### 6. DAG Validation — `POST /pipelines/parse`
+The original assessment endpoint, intact: returns `{num_nodes, num_edges, is_dag}` (Kahn's, seeding all in-degree-0 nodes so isolated/disconnected nodes don't false-trigger), with a Pydantic validator rejecting edges to unknown nodes (`422`). **Submit** shows the result in a styled card.
 
 ---
 
-## ✨ Beyond the Brief
+## 🔐 Security
 
-Five production-grade capabilities were layered on top of the assessment requirements. Each reuses the existing config-driven architecture without disrupting it, ships on its own branch, and is covered by tests and an in-browser verification.
+* **API keys never touch the graph** — held in the store + `localStorage`, sent top-level at run time only, and stripped from exports by `sanitizeNodesForExport` as defense-in-depth.
+* **Malformed-key guard** — a non-ASCII or absurdly long value pasted into a key field is rejected with a clear `400` instead of crashing the HTTP client.
 
-| Feature | What it does | Notable decision |
-| --- | --- | --- |
-| **Live cycle validation** | Edges that form a cycle render red + dashed the instant the loop closes, and clear themselves when an edge is removed. | Styling is **derived at render** (`useMemo`) from a pure `src/lib/graph.js` reachability check — store edges stay pristine, so cycle styling never leaks into the JSON export. |
-| **Export / Import JSON** | Export the canvas to `pipeline.json`; import one back to fully rehydrate it. | Import runs through a `store.importPipeline` action that **rebuilds the per-type id counter** from the imported ids, so a node added after import can't collide with an imported id. |
-| **Command palette (⌘K)** | Add any node type from a searchable, keyboard-driven palette ([`cmdk`](https://github.com/pacocoursey/cmdk)) — dropped at the center of the current viewport. | Uses `project()` (the method actually present on `useReactFlow` in the pinned reactflow `11.8.3`) against the canvas pane, and `getNodeID` to preserve the `${type}-${n}` convention. |
-| **Copy / paste (⌘C / ⌘V)** | Duplicate the current selection, including the edges *between* selected nodes, offset diagonally and re-selected (Figma-style). | A two-pass clone remaps `source`/`target` **and** the `${nodeId}-${handleId}` handle strings via prefix swap, so duplicated subgraphs keep their wiring. A focus guard ignores the shortcut while typing in a field. |
-| **Node deletion** | A contextual **✕** button on every node removes it and prunes its orphaned edges. | Native `Backspace`/`Delete` only fires when the node element itself holds focus (verified in-browser); the button is the focus- and zoom-independent primary path. Carries reactflow's `nodrag` class so the click isn't swallowed by a drag. |
+---
 
-### Keyboard shortcuts
+## ✨ Canvas UX
 
-| Shortcut | Action |
+| Feature | How |
 | --- | --- |
-| `⌘K` / `Ctrl+K` | Open the command palette to add a node |
-| `⌘C` / `Ctrl+C` | Copy the selected node(s) |
-| `⌘V` / `Ctrl+V` | Paste the copied selection |
-| `Backspace` / `Delete` | Delete the focused node (or use the ✕ button) |
-| `Shift` + drag | Box-select multiple nodes |
+| **Command palette** | `⌘K` / `Ctrl+K` — searchable node add, dropped at viewport center |
+| **Copy / paste** | `⌘C` / `⌘V` — duplicates the selection *and* the edges between them (handles remapped), focus-guarded so it never hijacks text editing |
+| **Delete** | `✕` button per node (focus-independent) or `Backspace`/`Delete` |
+| **Live cycle validation** | Edges that form a cycle render red + dashed instantly; clears itself when broken (derived, never mutates store edges) |
+| **Export / Import** | Download/round-trip the pipeline as JSON (keys scrubbed; id counter rebuilt on import) |
 
 ---
 
-## ⚙️ Configuration & Tooling
+## ⚙️ Tooling
 
 ### Styling Pipeline
+`react-scripts@5` silently drops external PostCSS plugins (the CRACO trap), so Tailwind is **precompiled via its own CLI**: `src/styles/index.css` → `src/styles/tailwind-out.css` (gitignored) before Webpack, wired through `prestart` + `concurrently`. Standard `npm start` / `npm run build` work unchanged.
 
-`react-scripts@5` silently drops external PostCSS plugins injected via CRACO, breaking Tailwind compilation in standard CRA setups. To maintain build determinism without ejecting or fighting Webpack internals, Tailwind is **precompiled via its own CLI**.
-
-* `src/styles/index.css` is compiled to `src/styles/tailwind-out.css` (gitignored) prior to Webpack bundling.
-* Standard `npm start` and `npm run build` commands function seamlessly via `concurrently`.
-
-### Environment Variables
-
-* **Frontend:** Copy `frontend/.env.example` to `frontend/.env` to override `REACT_APP_API_URL`.
-* **Backend:** Define `CORS_ORIGINS` (comma-separated) to authorize external frontend deployments.
+### Environment
+* **Frontend:** copy `frontend/.env.example` → `frontend/.env` to override `REACT_APP_API_URL`.
+* **Backend:** `CORS_ORIGINS` (comma-separated) to authorize external frontends.
 
 ---
 
 ## 🧪 Testing
 
-The logic-heavy surfaces are covered by focused test suites (32 frontend + 14 backend), run on every push via GitHub Actions.
+**24 backend + 48 frontend**, run on every push via GitHub Actions.
 
-**Frontend (32 tests):** variable parsing, store mechanics (immutable updates, edge pruning, import counter rebuild, copy/paste subgraph rewiring), graph cycle detection, the submit flow, and the API client.
-
-```bash
-cd frontend
-CI=true npm test -- --watchAll=false
-```
-
-**Backend (DAG Algorithm):**
-*Tests cover empty graphs, simple chains, self-loops, standard cycles, diamond patterns, disconnected components, and isolated nodes.*
+* **Backend (pytest):** DAG algorithm (cycles, diamonds, isolated nodes), referential integrity, the execution engine (interpolation, scrape HTML-stripping, Extract JSON-schema build, provider routing `501`, malformed-key `400`, missing-key / no-fields guards).
+* **Frontend (jest):** variable parsing, store mechanics (immutable updates, edge pruning, import counter, copy/paste rewiring), type-compatibility rules, Extract dynamic handles, export sanitization, the submit flow.
 
 ```bash
-cd backend
-source .venv/bin/activate
-python -m pytest -v
+# frontend
+cd frontend && CI=true npm test -- --watchAll=false
+# backend
+cd backend && source .venv/bin/activate && python -m pytest -v
 ```
+
+---
+
+## 🗺️ Roadmap
+
+* **Phase 2 — multi-SDK backend:** wire Anthropic (`anthropic`) and Google (`google-generativeai`) with per-provider structured-output adapters (OpenAI `response_format`, Anthropic tool-use, Gemini `response_schema`), so the provider dropdowns light up end-to-end.
+* Optional: a "reader mode" for Scrape (Jina Reader) and persisted pipelines.
