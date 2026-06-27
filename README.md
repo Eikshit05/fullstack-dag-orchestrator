@@ -73,6 +73,30 @@ The backend exposes `POST /pipelines/parse`, accepting a JSON payload of nodes a
 
 ---
 
+## ✨ Beyond the Brief
+
+Five production-grade capabilities were layered on top of the assessment requirements. Each reuses the existing config-driven architecture without disrupting it, ships on its own branch, and is covered by tests and an in-browser verification.
+
+| Feature | What it does | Notable decision |
+| --- | --- | --- |
+| **Live cycle validation** | Edges that form a cycle render red + dashed the instant the loop closes, and clear themselves when an edge is removed. | Styling is **derived at render** (`useMemo`) from a pure `src/lib/graph.js` reachability check — store edges stay pristine, so cycle styling never leaks into the JSON export. |
+| **Export / Import JSON** | Export the canvas to `pipeline.json`; import one back to fully rehydrate it. | Import runs through a `store.importPipeline` action that **rebuilds the per-type id counter** from the imported ids, so a node added after import can't collide with an imported id. |
+| **Command palette (⌘K)** | Add any node type from a searchable, keyboard-driven palette ([`cmdk`](https://github.com/pacocoursey/cmdk)) — dropped at the center of the current viewport. | Uses `project()` (the method actually present on `useReactFlow` in the pinned reactflow `11.8.3`) against the canvas pane, and `getNodeID` to preserve the `${type}-${n}` convention. |
+| **Copy / paste (⌘C / ⌘V)** | Duplicate the current selection, including the edges *between* selected nodes, offset diagonally and re-selected (Figma-style). | A two-pass clone remaps `source`/`target` **and** the `${nodeId}-${handleId}` handle strings via prefix swap, so duplicated subgraphs keep their wiring. A focus guard ignores the shortcut while typing in a field. |
+| **Node deletion** | A contextual **✕** button on every node removes it and prunes its orphaned edges. | Native `Backspace`/`Delete` only fires when the node element itself holds focus (verified in-browser); the button is the focus- and zoom-independent primary path. Carries reactflow's `nodrag` class so the click isn't swallowed by a drag. |
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘K` / `Ctrl+K` | Open the command palette to add a node |
+| `⌘C` / `Ctrl+C` | Copy the selected node(s) |
+| `⌘V` / `Ctrl+V` | Paste the copied selection |
+| `Backspace` / `Delete` | Delete the focused node (or use the ✕ button) |
+| `Shift` + drag | Box-select multiple nodes |
+
+---
+
 ## ⚙️ Configuration & Tooling
 
 ### Styling Pipeline
@@ -91,9 +115,9 @@ The backend exposes `POST /pipelines/parse`, accepting a JSON payload of nodes a
 
 ## 🧪 Testing
 
-The logic-heavy surfaces are covered by focused test suites.
+The logic-heavy surfaces are covered by focused test suites (32 frontend + 14 backend), run on every push via GitHub Actions.
 
-**Frontend (Variable Parsing):**
+**Frontend (32 tests):** variable parsing, store mechanics (immutable updates, edge pruning, import counter rebuild, copy/paste subgraph rewiring), graph cycle detection, the submit flow, and the API client.
 
 ```bash
 cd frontend
