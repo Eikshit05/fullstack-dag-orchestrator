@@ -213,6 +213,13 @@ def _require_ai(node, api_keys, action):
             status_code=400,
             detail=f"Execution paused: add your {label} API key in Settings (⚙️) to {action}.",
         )
+    # A real key is short, plain ASCII. Reject pasted prose/garbage cleanly rather
+    # than letting it blow up header encoding deep in the HTTP client.
+    if not api_key.isascii() or len(api_key) > 300:
+        raise HTTPException(
+            status_code=400,
+            detail=f"That {label} API key looks invalid (non-text characters or too long) — re-enter it in Settings (⚙️).",
+        )
     return provider, api_key
 
 

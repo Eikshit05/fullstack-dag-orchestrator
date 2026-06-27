@@ -5,6 +5,26 @@ from main import app, _strip_html, build_extract_schema
 client = TestClient(app)
 
 
+def test_malformed_api_key_rejected_cleanly():
+    """Prose/garbage pasted into the key field fails with a clear 400, not an
+    httpx header-encoding crash."""
+    payload = {
+        "apiKeys": {"openai": "Exactly. This is not a key " + "x" * 400},
+        "nodes": [
+            node("customInput-1", "customInput", value="hi"),
+            node("llm-1", "llm", provider="OpenAI", model="gpt-4o-mini"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "llm-1", "prompt"),
+            edge("llm-1", "response", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 400
+    assert "looks invalid" in res.json()["detail"]
+
+
 def test_anthropic_provider_not_wired_returns_501():
     """Selecting a not-yet-wired provider fails cleanly (501), even with a key."""
     payload = {
