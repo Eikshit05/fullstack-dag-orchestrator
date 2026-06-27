@@ -141,6 +141,42 @@ def test_non_auth_error_still_returns_502(monkeypatch):
     assert "API error" in res.json()["detail"]
 
 
+def test_explain_summarizes_run(monkeypatch):
+    """The explain endpoint feeds the graph + context to the model and returns
+    its structured {summary, steps}."""
+    captured = {}
+
+    def fake_json(api_key, model, system, user, schema, schema_name="result"):
+        captured["user"] = user
+        return {"summary": "Scraped a doc and extracted fields.",
+                "steps": [{"node_id": "scrape-1", "action": "Fetched the document."}]}
+
+    monkeypatch.setattr(main, "_openai_json", fake_json)
+    payload = {
+        "apiKeys": {"openai": "sk-ok"},
+        "nodes": [
+            node("scrape-1", "scrape", url="https://example.com"),
+            node("customOutput-1", "customOutput", outputName="page"),
+        ],
+        "edges": [edge("scrape-1", "content", "customOutput-1", "value")],
+        "context": {"scrape-1": "Example Domain ...", "customOutput-1": "Example Domain ..."},
+    }
+    res = client.post("/pipelines/explain", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["summary"].startswith("Scraped")
+    assert body["steps"][0]["node_id"] == "scrape-1"
+    # the execution log actually reached the model
+    assert "scrape-1" in captured["user"] and "Example Domain" in captured["user"]
+
+
+def test_explain_without_key_returns_400():
+    payload = {"nodes": [], "edges": [], "context": {}}
+    res = client.post("/pipelines/explain", json=payload)
+    assert res.status_code == 400
+    assert "API key" in res.json()["detail"]
+
+
 def test_build_extract_schema_maps_types():
     fields = [
         {"name": "company", "type": "Text"},

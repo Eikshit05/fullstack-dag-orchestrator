@@ -496,3 +496,99 @@ def run_pipeline(pipeline: RunPipeline):
             context[nid] = _resolve(context, ins[0][1], ins[0][2]) if ins else ""
 
     return {"status": "success", "outputs": outputs, "context": context}
+
+
+# ---------------------------------------------------------------------------
+# Observability — POST /pipelines/explain
+# ---------------------------------------------------------------------------
+# A post-run "explain this run" agent: reads the execution log (the memory bus
+# the run already produced) and narrates, in plain English, what each node did.
+
+
+class ExplainPipeline(BaseModel):
+    nodes: list[RunNodeModel]
+    edges: list[RunEdgeModel]
+    context: dict = {}      # the memory bus returned by /pipelines/run
+    apiKeys: dict = {}
+
+
+EXPLAIN_SYS = (
+    "You are a technical observability agent. You are given the JSON execution "
+    "graph of an AI pipeline and the actual data (context) each node produced "
+    "during its run. Read this log and explain, plainly, what just happened.\n"
+    "Return JSON with:\n"
+    "1. \"summary\": one concise paragraph of plain English describing what the "
+    "whole pipeline accomplished, grounded in the real data produced.\n"
+    "2. \"steps\": an array, one object per node in execution order, each with "
+    "\"node_id\" and \"action\" — a single clear sentence on what that node did "
+    "(e.g. \"Scraped the résumé document and extracted ~8k characters of text.\")."
+)
+
+EXPLAIN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "steps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "action": {"type": "string"},
+                },
+                "required": ["node_id", "action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["summary", "steps"],
+    "additionalProperties": False,
+}
+
+_EXPLAIN_CONFIG_KEYS = ("inputName", "value", "inputType", "url", "text", "provider", "model", "outputName", "fields")
+
+
+def _openai_json(api_key, model, system, user, schema, schema_name="result"):
+    """One OpenAI structured-output call returning parsed JSON. Lazy-imported."""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        response_format={"type": "json_schema", "json_schema": {"name": schema_name, "schema": schema, "strict": True}},
+    )
+    return json.loads(resp.choices[0].message.content)
+
+
+def _explain_payload(nodes, edges, context):
+    """A compact, execution-ordered description of the run for the explainer:
+    each node's type, key config, and what it produced (lightly capped)."""
+    order = topological_order(nodes, edges) or [n.id for n in nodes]
+    by_id = {n.id: n for n in nodes}
+    lines = []
+    for nid in order:
+        node = by_id.get(nid)
+        if not node:
+            continue
+        cfg = {k: v for k, v in (node.data or {}).items() if k in _EXPLAIN_CONFIG_KEYS}
+        out = context.get(nid, "")
+        out_str = out if isinstance(out, str) else json.dumps(out)
+        lines.append(
+            f"NODE {nid} (type={node.type})\n  config: {json.dumps(cfg)[:600]}\n  output: {out_str[:3000]}"
+        )
+    return "EXECUTION LOG (in run order):\n\n" + "\n\n".join(lines)
+
+
+@app.post("/pipelines/explain")
+def explain_pipeline(pipeline: ExplainPipeline):
+    api_key = (pipeline.apiKeys or {}).get("openai")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Add your OpenAI API key in Settings (⚙️) to explain a run.")
+    if not api_key.isascii() or len(api_key) > 300:
+        raise HTTPException(status_code=400, detail="That OpenAI API key looks invalid — re-enter it in Settings (⚙️).")
+    user = _explain_payload(pipeline.nodes, pipeline.edges, pipeline.context)
+    try:
+        result = _openai_json(api_key, "gpt-4o-mini", EXPLAIN_SYS, user, EXPLAIN_SCHEMA, "run_explanation")
+    except Exception as exc:  # rejected key / network — classified like the run path
+        raise _ai_http_error("openai", exc, "explain")
+    return {"summary": result.get("summary", ""), "steps": result.get("steps", [])}

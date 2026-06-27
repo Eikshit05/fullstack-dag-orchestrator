@@ -64,6 +64,11 @@
            hover:brightness-110 active:scale-[0.98] transition
            disabled:opacity-60 disabled:cursor-not-allowed;
   }
+  .vs-explain-btn {
+    @apply w-full px-4 py-2 rounded-lg border border-accent-ai text-accent-ai
+           text-sm font-medium hover:bg-accent-ai hover:text-white transition
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
   .vs-toast {
     @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] max-w-md cursor-pointer
            px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-lg;
