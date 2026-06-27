@@ -1,8 +1,64 @@
 from fastapi.testclient import TestClient
 
-from main import app, _strip_html, build_extract_schema
+import main
+from main import app, _strip_html, build_extract_schema, _to_gemini_schema
 
 client = TestClient(app)
+
+
+def test_to_gemini_schema_uppercases_types_and_drops_extra_keys():
+    schema = build_extract_schema([
+        {"name": "company", "type": "Text"},
+        {"name": "revenue", "type": "Decimal"},
+        {"name": "risks", "type": "List"},
+    ])
+    g = _to_gemini_schema(schema)
+    assert g["type"] == "OBJECT"
+    assert g["properties"]["company"]["type"] == "STRING"
+    assert g["properties"]["revenue"]["type"] == "NUMBER"
+    assert g["properties"]["risks"] == {"type": "ARRAY", "items": {"type": "STRING"}}
+    assert "additionalProperties" not in g  # Gemini rejects it
+    assert g["required"] == ["company", "revenue", "risks"]
+
+
+def test_llm_routes_to_selected_provider(monkeypatch):
+    """An Anthropic-selected LLM node dispatches to the Anthropic chat adapter."""
+    monkeypatch.setitem(main.PROVIDERS["anthropic"], "chat", lambda key, model, system, prompt: f"[{model}] analyzed")
+    payload = {
+        "apiKeys": {"anthropic": "sk-ant-fake"},
+        "nodes": [
+            node("customInput-1", "customInput", value="hello"),
+            node("llm-1", "llm", provider="Anthropic", model="claude-sonnet-4-6"),
+            node("customOutput-1", "customOutput", outputName="out"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "llm-1", "prompt"),
+            edge("llm-1", "response", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 200
+    assert res.json()["outputs"]["out"] == "[claude-sonnet-4-6] analyzed"
+
+
+def test_extract_routes_to_selected_provider(monkeypatch):
+    """A Google-selected Extract node dispatches to the Google extract adapter."""
+    monkeypatch.setitem(main.PROVIDERS["google"], "extract", lambda key, model, text, schema: {"company": "Acme"})
+    payload = {
+        "apiKeys": {"google": "AIza-fake"},
+        "nodes": [
+            node("customInput-1", "customInput", value="Acme is a company."),
+            node("extract-1", "extract", provider="Google", model="gemini-3.5-flash", fields=[{"name": "company", "type": "Text"}]),
+            node("customOutput-1", "customOutput", outputName="company"),
+        ],
+        "edges": [
+            edge("customInput-1", "value", "extract-1", "context"),
+            edge("extract-1", "field-company", "customOutput-1", "value"),
+        ],
+    }
+    res = client.post("/pipelines/run", json=payload)
+    assert res.status_code == 200
+    assert res.json()["outputs"]["company"] == "Acme"
 
 
 def test_malformed_api_key_rejected_cleanly():
@@ -23,25 +79,6 @@ def test_malformed_api_key_rejected_cleanly():
     res = client.post("/pipelines/run", json=payload)
     assert res.status_code == 400
     assert "looks invalid" in res.json()["detail"]
-
-
-def test_anthropic_provider_not_wired_returns_501():
-    """Selecting a not-yet-wired provider fails cleanly (501), even with a key."""
-    payload = {
-        "apiKeys": {"anthropic": "sk-ant-x"},
-        "nodes": [
-            node("customInput-1", "customInput", value="hi"),
-            node("llm-1", "llm", provider="Anthropic", model="claude-sonnet-4-6"),
-            node("customOutput-1", "customOutput", outputName="out"),
-        ],
-        "edges": [
-            edge("customInput-1", "value", "llm-1", "prompt"),
-            edge("llm-1", "response", "customOutput-1", "value"),
-        ],
-    }
-    res = client.post("/pipelines/run", json=payload)
-    assert res.status_code == 501
-    assert "Anthropic" in res.json()["detail"]
 
 
 def test_build_extract_schema_maps_types():

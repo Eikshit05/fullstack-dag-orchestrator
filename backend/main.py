@@ -199,15 +199,12 @@ def _provider_and_key(node, api_keys):
 
 
 def _require_ai(node, api_keys, action):
-    """Shared guard for AI nodes: resolve provider + key, fail cleanly if missing
-    or if the provider isn't wired yet."""
+    """Shared guard for AI nodes: resolve provider + key, fail cleanly on an
+    unknown provider, a missing key, or a malformed key."""
     provider, api_key = _provider_and_key(node, api_keys)
     label = provider.title()
-    if provider != "openai":
-        raise HTTPException(
-            status_code=501,
-            detail=f"{label} routing isn't wired yet — select OpenAI to {action} (multi-provider backend is the next phase).",
-        )
+    if provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
     if not api_key:
         raise HTTPException(
             status_code=400,
@@ -224,27 +221,17 @@ def _require_ai(node, api_keys, action):
 
 
 def _run_llm(node, prompt, system, api_keys=None):
-    """Call OpenAI for an LLM node. Lazy-imports the SDK so the rest of the app
-    (and the test suite) runs without `openai` installed or any key configured."""
-    data = node.data or {}
-    _provider, api_key = _require_ai(node, api_keys, "run the LLM step")
-    model = data.get("model") or "gpt-4o-mini"
+    """Route an LLM node to its selected provider's chat adapter."""
+    provider, api_key = _require_ai(node, api_keys, "run the LLM step")
+    model = (node.data or {}).get("model") or DEFAULT_MODELS[provider]
     try:
-        from openai import OpenAI
-    except ImportError:
-        raise HTTPException(status_code=500, detail="The 'openai' package is not installed on the server.")
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": str(system)})
-    messages.append({"role": "user", "content": str(prompt or "")})
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(model=model, messages=messages)
-        return response.choices[0].message.content
+        return PROVIDERS[provider]["chat"](api_key, model, system, prompt)
     except HTTPException:
         raise
-    except Exception as exc:  # network / auth / quota errors surface cleanly
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc}")
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail=f"The {provider.title()} SDK isn't installed on the server ({exc}).")
+    except Exception as exc:  # auth / rate-limit / network — surface cleanly
+        raise HTTPException(status_code=502, detail=f"{provider.title()} API error: {exc}")
 
 
 _SCHEMA_TYPE_MAP = {"Text": "string", "Decimal": "number", "Boolean": "boolean", "List": "array"}
@@ -275,6 +262,124 @@ def build_extract_schema(fields):
     }
 
 
+_GEMINI_TYPES = {
+    "string": "STRING", "number": "NUMBER", "integer": "INTEGER",
+    "boolean": "BOOLEAN", "array": "ARRAY", "object": "OBJECT",
+}
+
+
+def _to_gemini_schema(schema):
+    """Translate our JSON Schema to Gemini's OpenAPI-subset (uppercase type names,
+    no additionalProperties). Pure + unit-tested."""
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    if "type" in schema:
+        out["type"] = _GEMINI_TYPES.get(schema["type"], str(schema["type"]).upper())
+    if "description" in schema:
+        out["description"] = schema["description"]
+    if "properties" in schema:
+        out["properties"] = {k: _to_gemini_schema(v) for k, v in schema["properties"].items()}
+    if "items" in schema:
+        out["items"] = _to_gemini_schema(schema["items"])
+    if schema.get("required"):
+        out["required"] = list(schema["required"])
+    return out
+
+
+# --- Provider adapters -----------------------------------------------------
+# Each provider exposes the same two functions; SDKs are lazy-imported so the app
+# and tests run without them installed. Structured output differs per provider:
+# OpenAI uses response_format json_schema, Anthropic forces a tool call, Gemini
+# uses response_schema.
+
+EXTRACT_SYS = (
+    "Extract the requested fields from the user's text. "
+    "If a field is not present, use a sensible empty value."
+)
+
+
+def _openai_chat(api_key, model, system, prompt):
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": str(system)})
+    messages.append({"role": "user", "content": str(prompt or "")})
+    resp = client.chat.completions.create(model=model, messages=messages)
+    return resp.choices[0].message.content
+
+
+def _openai_extract(api_key, model, text, schema):
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": EXTRACT_SYS}, {"role": "user", "content": str(text)}],
+        response_format={"type": "json_schema", "json_schema": {"name": "extraction", "schema": schema, "strict": True}},
+    )
+    return json.loads(resp.choices[0].message.content)
+
+
+def _anthropic_chat(api_key, model, system, prompt):
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    kwargs = {"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": str(prompt or "")}]}
+    if system:
+        kwargs["system"] = str(system)
+    resp = client.messages.create(**kwargs)
+    return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+
+def _anthropic_extract(api_key, model, text, schema):
+    # Anthropic has no json_schema param — force a tool call whose input_schema
+    # is our schema, then read the tool input as the structured result.
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=2048,
+        tools=[{"name": "extract", "description": "Return the requested fields.", "input_schema": schema}],
+        tool_choice={"type": "tool", "name": "extract"},
+        messages=[{"role": "user", "content": f"{EXTRACT_SYS}\n\nText:\n{text}"}],
+    )
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use":
+            return block.input
+    return {}
+
+
+def _google_chat(api_key, model, system, prompt):
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    gm = genai.GenerativeModel(model, system_instruction=str(system) if system else None)
+    return gm.generate_content(str(prompt or "")).text
+
+
+def _google_extract(api_key, model, text, schema):
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    gm = genai.GenerativeModel(model)
+    resp = gm.generate_content(
+        f"{EXTRACT_SYS}\n\nText:\n{text}",
+        generation_config={"response_mime_type": "application/json", "response_schema": _to_gemini_schema(schema)},
+    )
+    return json.loads(resp.text)
+
+
+PROVIDERS = {
+    "openai": {"chat": _openai_chat, "extract": _openai_extract},
+    "anthropic": {"chat": _anthropic_chat, "extract": _anthropic_extract},
+    "google": {"chat": _google_chat, "extract": _google_extract},
+}
+
+DEFAULT_MODELS = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-6",
+    "google": "gemini-3.5-flash",
+}
+
+
 def _run_extract(node, text, api_keys=None):
     """Extract Data executor: build a JSON Schema from the node's fields, call the
     LLM in structured-output mode, and return a {field-<name>: value} dict so each
@@ -283,31 +388,17 @@ def _run_extract(node, text, api_keys=None):
     fields = data.get("fields") or []
     if not fields:
         raise HTTPException(status_code=400, detail=f"Extract node '{node.id}' has no schema fields defined.")
-    _provider, api_key = _require_ai(node, api_keys, "run extraction")
-    model = data.get("model") or "gpt-4o-mini"
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise HTTPException(status_code=500, detail="The 'openai' package is not installed on the server.")
+    provider, api_key = _require_ai(node, api_keys, "run extraction")
+    model = data.get("model") or DEFAULT_MODELS[provider]
     schema = build_extract_schema(fields)
     try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "Extract the requested fields from the user's text. If a field is not present, use a sensible empty value."},
-                {"role": "user", "content": str(text)},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "extraction", "schema": schema, "strict": True},
-            },
-        )
-        parsed = json.loads(response.choices[0].message.content)
+        parsed = PROVIDERS[provider]["extract"](api_key, model, text, schema)
     except HTTPException:
         raise
-    except Exception as exc:  # network / auth / parse errors surface cleanly
-        raise HTTPException(status_code=502, detail=f"OpenAI extraction error: {exc}")
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail=f"The {provider.title()} SDK isn't installed on the server ({exc}).")
+    except Exception as exc:  # auth / rate-limit / parse — surface cleanly
+        raise HTTPException(status_code=502, detail=f"{provider.title()} extraction error: {exc}")
     # Push each extracted value onto its corresponding output handle.
     out = {}
     for f in fields:
