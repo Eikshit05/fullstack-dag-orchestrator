@@ -14,6 +14,7 @@ export const useStore = create((set, get) => ({
     nodes: [],
     edges: [],
     nodeIDs: {},
+    clipboard: { nodes: [], edges: [] },
     getNodeID: (type) => {
         const newIDs = {...get().nodeIDs};
         if (newIDs[type] === undefined) {
@@ -45,6 +46,71 @@ export const useStore = create((set, get) => ({
         nodeIDs[type] = Math.max(nodeIDs[type] ?? 0, num);
       }
       set({ nodes, edges, nodeIDs });
+    },
+    // Copy the current selection into the in-memory clipboard. Only edges whose
+    // BOTH endpoints are selected travel with the copy, so a duplicated subgraph
+    // keeps its internal wiring without dragging in dangling edges.
+    copySelection: () => {
+      const selected = get().nodes.filter((n) => n.selected);
+      if (selected.length === 0) return;
+      const ids = new Set(selected.map((n) => n.id));
+      const internalEdges = get().edges.filter(
+        (e) => ids.has(e.source) && ids.has(e.target)
+      );
+      set({
+        clipboard: {
+          nodes: selected.map((n) => ({ ...n, data: { ...n.data } })),
+          edges: internalEdges.map((e) => ({ ...e })),
+        },
+      });
+    },
+    // Two-pass paste: (1) clone nodes with fresh ${type}-${n} ids + a diagonal
+    // offset, building an old->new id map; (2) clone the internal edges, remapping
+    // source/target AND the `${nodeId}-${handleId}` handle strings via prefix swap.
+    // Originals are deselected and only the fresh paste ends up selected.
+    pasteClipboard: () => {
+      const { nodes: clipNodes, edges: clipEdges } = get().clipboard;
+      if (!clipNodes || clipNodes.length === 0) return;
+
+      const idMap = {};
+      const newNodes = clipNodes.map((n) => {
+        const newId = get().getNodeID(n.type);
+        idMap[n.id] = newId;
+        return {
+          ...n,
+          id: newId,
+          selected: true,
+          position: { x: n.position.x + 40, y: n.position.y + 40 },
+          data: { ...n.data, id: newId },
+        };
+      });
+
+      // `${oldId}-handle` -> `${newId}-handle` (prefix swap, not blind replace).
+      const remapHandle = (handle, oldId, newId) =>
+        handle && handle.startsWith(`${oldId}-`)
+          ? `${newId}${handle.slice(oldId.length)}`
+          : handle;
+
+      const newEdges = clipEdges.map((e, i) => {
+        const newSource = idMap[e.source];
+        const newTarget = idMap[e.target];
+        return {
+          ...e,
+          id: `pasted-edge-${newSource}-${newTarget}-${i}-${Date.now()}`,
+          source: newSource,
+          target: newTarget,
+          sourceHandle: remapHandle(e.sourceHandle, e.source, newSource),
+          targetHandle: remapHandle(e.targetHandle, e.target, newTarget),
+        };
+      });
+
+      set({
+        nodes: [
+          ...get().nodes.map((n) => (n.selected ? { ...n, selected: false } : n)),
+          ...newNodes,
+        ],
+        edges: [...get().edges, ...newEdges],
+      });
     },
     onNodesChange: (changes) => {
       set({
