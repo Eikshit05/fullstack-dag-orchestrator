@@ -1,4 +1,7 @@
+import html as html_lib
+import json
 import os
+import re
 from collections import deque
 
 from fastapi import FastAPI, HTTPException
@@ -131,42 +134,59 @@ def _handle_suffix(node_id, handle):
     return handle
 
 
-def _input_by_suffix(ins, suffix, context):
-    """Pull the upstream output feeding a specific handle (by its suffix)."""
-    for handle, source in ins:
-        if handle == suffix:
-            return context.get(source, "")
+def _resolve(context, source, source_suffix):
+    """Read a source node's output. Most nodes store a single value; multi-output
+    nodes (e.g. Extract Data) store a {handle_suffix: value} dict, so we pick the
+    value produced on the specific source handle the edge connects from."""
+    raw = context.get(source)
+    if isinstance(raw, dict):
+        return raw.get(source_suffix, "")
+    return raw if raw is not None else ""
+
+
+def _input_by_suffix(ins, target_suffix, context):
+    """Pull the upstream value feeding a specific input handle (by its suffix)."""
+    for t_suffix, source, s_suffix in ins:
+        if t_suffix == target_suffix:
+            return _resolve(context, source, s_suffix)
     return None
 
 
-def _require_number(value, node_id, handle):
-    """Parse a Math input as a number, or fail loudly. An unconnected input
-    (value is None) defaults to 0; a connected non-numeric value (e.g. the text
-    "who is jordan belfort?") raises instead of silently coercing to 0."""
-    if value is None:
-        return 0.0
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _strip_html(markup):
+    """Reduce an HTML document to readable text: drop script/style, strip tags,
+    unescape entities, collapse whitespace. Pure + unit-tested."""
+    text = _SCRIPT_STYLE_RE.sub(" ", markup)
+    text = _TAG_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text)
+    return html_lib.unescape(text).strip()
+
+
+def _scrape_url(url):
+    """Fetch a URL and return its readable text (JSON passes through verbatim)."""
+    if not url or url.strip() in ("", "https://", "http://"):
+        raise HTTPException(status_code=400, detail="Scrape node has no URL to fetch.")
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Math node '{node_id}' expected a number for input '{handle}', but got {value!r}.",
+        import httpx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="The 'httpx' package is not installed on the server.")
+    try:
+        resp = httpx.get(
+            url, timeout=10.0, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (pipeline-scraper)"},
         )
-
-
-def _apply_op(a, b, op):
-    if op == "+":
-        r = a + b
-    elif op == "-":
-        r = a - b
-    elif op in ("×", "*"):
-        r = a * b
-    elif op in ("÷", "/"):
-        r = a / b if b != 0 else 0.0
-    else:
-        r = 0.0
-    # Render whole numbers without a trailing .0 (so 2 + 2 reads as "4").
-    return str(int(r)) if r == int(r) else str(r)
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as exc:  # DNS, timeout, HTTP error — surface cleanly
+        raise HTTPException(status_code=502, detail=f"Scrape failed for {url}: {exc}")
+    content_type = resp.headers.get("content-type", "")
+    body = resp.text if "application/json" in content_type else _strip_html(resp.text)
+    return body[:8000]  # cap payload so a huge page can't flood the graph
 
 
 def _run_llm(node, prompt, system):
@@ -198,6 +218,81 @@ def _run_llm(node, prompt, system):
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc}")
 
 
+_SCHEMA_TYPE_MAP = {"Text": "string", "Decimal": "number", "Boolean": "boolean", "List": "array"}
+
+
+def build_extract_schema(fields):
+    """Turn the node's schema rows into a strict JSON Schema object for the LLM's
+    structured-output mode. Pure + unit-tested."""
+    properties = {}
+    required = []
+    for f in fields:
+        name = (f or {}).get("name")
+        if not name:
+            continue
+        json_type = _SCHEMA_TYPE_MAP.get(f.get("type"), "string")
+        prop = {"type": json_type}
+        if json_type == "array":
+            prop["items"] = {"type": "string"}
+        if f.get("description"):
+            prop["description"] = f["description"]
+        properties[name] = prop
+        required.append(name)
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _run_extract(node, text):
+    """Extract Data executor: build a JSON Schema from the node's fields, call the
+    LLM in structured-output mode, and return a {field-<name>: value} dict so each
+    value lands on its own typed output handle. BYOK, lazy OpenAI import."""
+    data = node.data or {}
+    fields = data.get("fields") or []
+    api_key = data.get("apiKey")
+    model = data.get("model") or "gpt-4o-mini"
+    if not fields:
+        raise HTTPException(status_code=400, detail=f"Extract node '{node.id}' has no schema fields defined.")
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Execution paused: add an OpenAI API key to node '{node.id}' to run extraction.",
+        )
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise HTTPException(status_code=500, detail="The 'openai' package is not installed on the server.")
+    schema = build_extract_schema(fields)
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Extract the requested fields from the user's text. If a field is not present, use a sensible empty value."},
+                {"role": "user", "content": str(text)},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "extraction", "schema": schema, "strict": True},
+            },
+        )
+        parsed = json.loads(response.choices[0].message.content)
+    except HTTPException:
+        raise
+    except Exception as exc:  # network / auth / parse errors surface cleanly
+        raise HTTPException(status_code=502, detail=f"OpenAI extraction error: {exc}")
+    # Push each extracted value onto its corresponding output handle.
+    out = {}
+    for f in fields:
+        name = (f or {}).get("name")
+        if name:
+            out[f"field-{name}"] = parsed.get(name, "")
+    return out
+
+
 @app.post("/pipelines/run")
 def run_pipeline(pipeline: RunPipeline):
     order = topological_order(pipeline.nodes, pipeline.edges)
@@ -206,13 +301,14 @@ def run_pipeline(pipeline: RunPipeline):
 
     nodes_by_id = {n.id: n for n in pipeline.nodes}
 
-    # target node -> list of (incoming handle suffix, source node id)
+    # target node -> list of (target handle suffix, source node id, source handle suffix)
     incoming = {}
     for e in pipeline.edges:
-        suffix = _handle_suffix(e.target, e.targetHandle) if e.targetHandle else None
-        incoming.setdefault(e.target, []).append((suffix, e.source))
+        t_suffix = _handle_suffix(e.target, e.targetHandle) if e.targetHandle else None
+        s_suffix = _handle_suffix(e.source, e.sourceHandle) if e.sourceHandle else None
+        incoming.setdefault(e.target, []).append((t_suffix, e.source, s_suffix))
 
-    context = {}   # the "memory bus": node id -> its computed output
+    context = {}   # the "memory bus": node id -> value, or {handle: value} for multi-output
     outputs = {}   # output node label -> value (the user-facing result)
 
     for nid in order:
@@ -225,31 +321,34 @@ def run_pipeline(pipeline: RunPipeline):
 
         elif node.type == "text":
             text = data.get("text", "")
-            for suffix, source in ins:
-                if suffix and suffix.startswith("var-"):
-                    var = suffix[len("var-"):]
-                    text = text.replace("{{" + var + "}}", str(context.get(source, "")))
+            for t_suffix, source, s_suffix in ins:
+                if t_suffix and t_suffix.startswith("var-"):
+                    var = t_suffix[len("var-"):]
+                    text = text.replace("{{" + var + "}}", str(_resolve(context, source, s_suffix)))
             context[nid] = text
 
-        elif node.type == "math":
-            a = _require_number(_input_by_suffix(ins, "a", context), nid, "a")
-            b = _require_number(_input_by_suffix(ins, "b", context), nid, "b")
-            context[nid] = _apply_op(a, b, data.get("operator", "+"))
+        elif node.type == "scrape":
+            url = _input_by_suffix(ins, "url", context) or data.get("url")
+            context[nid] = _scrape_url(url)
 
         elif node.type == "llm":
             prompt = _input_by_suffix(ins, "prompt", context)
             system = _input_by_suffix(ins, "system", context)
             context[nid] = _run_llm(node, prompt, system)
 
+        elif node.type == "extract":
+            text = _input_by_suffix(ins, "context", context) or ""
+            context[nid] = _run_extract(node, text)  # {f"field-{name}": value}
+
         elif node.type == "customOutput":
             value = _input_by_suffix(ins, "value", context)
             if value is None and ins:
-                value = context.get(ins[0][1], "")
-            context[nid] = value or ""
+                value = _resolve(context, ins[0][1], ins[0][2])
+            context[nid] = "" if value is None else value
             outputs[data.get("outputName") or nid] = context[nid]
 
         else:
             # Unknown/passthrough node: forward its first input (or empty).
-            context[nid] = context.get(ins[0][1], "") if ins else ""
+            context[nid] = _resolve(context, ins[0][1], ins[0][2]) if ins else ""
 
     return {"status": "success", "outputs": outputs, "context": context}

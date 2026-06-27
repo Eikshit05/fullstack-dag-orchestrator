@@ -4,6 +4,7 @@ import { SelectField } from './SelectField';
 import { NumberField } from './NumberField';
 import { CheckboxField } from './CheckboxField';
 import { PasswordField } from './PasswordField';
+import { SchemaField } from './SchemaField';
 
 export const FIELD_COMPONENTS = {
   text: TextField,
@@ -12,4 +13,5 @@ export const FIELD_COMPONENTS = {
   number: NumberField,
   checkbox: CheckboxField,
   password: PasswordField,
+  schema: SchemaField,
 };

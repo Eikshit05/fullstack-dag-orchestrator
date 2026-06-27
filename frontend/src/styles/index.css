@@ -22,6 +22,15 @@
     @apply border border-slate-200 rounded-md px-2 py-1 text-sm outline-none
            focus:border-accent-io focus:ring-1 focus:ring-accent-io;
   }
+  .vs-schema-row { @apply flex items-center gap-1.5; }
+  .vs-schema-row .vs-field__control:first-child { @apply flex-1 min-w-0; }
+  .vs-schema-remove {
+    @apply shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs
+           text-slate-400 hover:text-red-500 hover:bg-slate-100 transition-colors;
+  }
+  .vs-schema-add {
+    @apply self-start text-xs font-medium text-accent-ai hover:brightness-110 cursor-pointer;
+  }
   .vs-note {
     @apply w-44 h-20 p-2 text-sm bg-amber-50 border border-amber-200 rounded-md outline-none resize-none;
   }
