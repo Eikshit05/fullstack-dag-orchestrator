@@ -19,31 +19,21 @@ describe('SubmitButton — network & event-loop resilience', () => {
     delete global.fetch;
   });
 
-  it('paints the ResultCard before the deferred window.alert fires', async () => {
+  it('shows the ResultCard as the only feedback (no native alert)', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ num_nodes: 2, num_edges: 1, is_dag: true }),
     });
-
-    // Capture whether the card was already in the DOM at the instant alert() ran.
-    let cardPresentWhenAlerted = null;
-    let alertMessage = null;
-    jest.spyOn(window, 'alert').mockImplementation((msg) => {
-      alertMessage = msg;
-      cardPresentWhenAlerted = !!screen.queryByText('Pipeline Submitted');
-    });
+    jest.spyOn(window, 'alert').mockImplementation(() => {});
 
     render(<SubmitButton />);
     fireEvent.click(screen.getByText('Submit'));
 
-    // The styled card renders as soon as the response resolves…
+    // The styled card renders with the parse result…
     expect(await screen.findByText('Pipeline Submitted')).toBeInTheDocument();
     expect(screen.getByText('Valid DAG')).toBeInTheDocument();
-
-    // …and the native alert (deferred via setTimeout(0)) fires afterward.
-    await waitFor(() => expect(window.alert).toHaveBeenCalledTimes(1));
-    expect(cardPresentWhenAlerted).toBe(true);
-    expect(alertMessage).toBe('Nodes: 2 · Edges: 1 · Valid DAG: Yes');
+    // …and no native alert popup fires anymore.
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it('degrades gracefully on a backend error (no unhandled rejection, no alert)', async () => {
