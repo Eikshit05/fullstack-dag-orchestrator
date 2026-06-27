@@ -22,9 +22,7 @@ export const SubmitButton = () => {
     setResult(null);
     try {
       const data = await parsePipeline(nodes, edges);
-      setResult(data); // render the styled card first…
-      const msg = `Nodes: ${data.num_nodes} · Edges: ${data.num_edges} · Valid DAG: ${data.is_dag ? 'Yes' : 'No'}`;
-      setTimeout(() => window.alert(msg), 0); // …then the spec-required alert, after paint
+      setResult(data); // show the styled ResultCard (no native alert)
     } catch (e) {
       setError('Could not reach the backend. Is it running on the configured URL?');
     }
