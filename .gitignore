@@ -35,3 +35,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 *.log
+
+# Local-only docs (planning notes, demo script) — not for the public repo
+docs/
