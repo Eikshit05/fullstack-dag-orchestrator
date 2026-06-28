@@ -213,7 +213,7 @@ cd backend && source .venv/bin/activate && python -m pytest -v
 
 ## 🗺️ Roadmap
 
-Where this goes next, in three steps — close the gaps, add product depth, then the enterprise layer:
+Where this goes next, in three steps — persistence, then product depth, then the enterprise layer:
 
 1. **Persist pipelines server-side** — so workflows can be saved, versioned, and shared instead of imported and exported as JSON.
 2. **Product depth that matters for a fund.** A **retrieval (RAG) node** — semantic search over a document set so answers are grounded in an institutional knowledge base; and **batch execution** — running one pipeline across an entire portfolio of companies at once (the Split Text node already sets this up).
