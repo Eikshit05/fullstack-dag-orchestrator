@@ -215,6 +215,6 @@ cd backend && source .venv/bin/activate && python -m pytest -v
 
 Where this goes next, in three steps — close the gaps, add product depth, then the enterprise layer:
 
-1. **Close the honest gaps.** Live-validate the Anthropic and Google paths (wired and unit-tested today, but only OpenAI is verified end-to-end), and **persist pipelines server-side** so workflows can be saved and shared instead of imported as JSON.
+1. **Persist pipelines server-side** — so workflows can be saved, versioned, and shared instead of imported and exported as JSON.
 2. **Product depth that matters for a fund.** A **retrieval (RAG) node** — semantic search over a document set so answers are grounded in an institutional knowledge base; and **batch execution** — running one pipeline across an entire portfolio of companies at once (the Split Text node already sets this up).
 3. **The enterprise layer.** **Per-node cost & latency tracking** and a **full run history**, so every AI-generated figure is auditable and traceable back to the exact step that produced it.
